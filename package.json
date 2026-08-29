@@ -2,6 +2,7 @@
   "name": "mistake-book",
   "private": true,
   "version": "0.1.0",
+  "license": "MIT",
   "description": "学生错题本:录入 → 确认 → AI 分析 → 复习 → 出题 → 掌握度",
   "scripts": {
     "dev": "pnpm -r --parallel dev",
