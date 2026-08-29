@@ -1,0 +1,12 @@
+# 模型配置:只有一个 text_model 槽位(错误分析/出题/判分/总结;识题在豆包侧完成,系统不接视觉模型)。
+# provider 只允许 deepseek / glm / kimi / mock(mock 仅用于开发测试);普通文本模型即可,无需多模态。
+# protocol: openai(Chat Completions) | anthropic(Messages,如 Kimi 端点)。
+# 密钥不写在这里,只通过 api_key_env 指向的环境变量提供。
+# 修改后重启服务生效;不做热切换、自动路由或故障转移。
+
+text_model:
+  provider: deepseek
+  protocol: openai
+  base_url: https://api.deepseek.com
+  api_key_env: DEEPSEEK_API_KEY
+  model: deepseek-v4-flash

@@ -1,0 +1,223 @@
+/* 全局视觉层:背景、卡片质感、导航、表格、滚动条。
+   只做样式,不承载业务逻辑;深浅色都通过 Mantine 的 color-scheme 变量适配。 */
+
+/* ---------- 页面背景 ---------- */
+[data-mantine-color-scheme="light"] .app-main {
+  background:
+    radial-gradient(1200px 400px at 85% -10%, rgba(125, 135, 245, 0.07), transparent 60%),
+    #f5f6fa;
+}
+[data-mantine-color-scheme="dark"] .app-main {
+  background:
+    radial-gradient(1200px 400px at 85% -10%, rgba(125, 135, 245, 0.08), transparent 60%),
+    #0f1012;
+}
+
+/* ---------- 侧栏 ---------- */
+.app-navbar {
+  display: flex;
+  flex-direction: column;
+  border-right: 1px solid var(--mantine-color-default-border);
+}
+[data-mantine-color-scheme="light"] .app-navbar {
+  background: rgba(255, 255, 255, 0.85);
+}
+[data-mantine-color-scheme="dark"] .app-navbar {
+  background: #141518;
+}
+
+.app-brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 20px 20px 16px;
+}
+
+.app-brand-mark {
+  width: 42px;
+  height: 42px;
+  border-radius: 13px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  background: linear-gradient(135deg, #7d87f5 0%, #9b6ef3 100%);
+  box-shadow: 0 4px 12px rgba(125, 135, 245, 0.35);
+  flex-shrink: 0;
+}
+
+.app-nav {
+  flex: 1;
+  padding: 4px 12px;
+  overflow-y: auto;
+}
+
+.app-nav .mantine-NavLink-root {
+  border-radius: 10px;
+  margin-bottom: 2px;
+  --nl-padding: 10px;
+}
+.app-nav .mantine-NavLink-root:hover {
+  background-color: var(--mantine-color-default-border-hover);
+}
+[data-mantine-color-scheme="light"] .app-nav .mantine-NavLink-root[data-active] {
+  background: linear-gradient(90deg, rgba(125, 135, 245, 0.14), rgba(155, 110, 243, 0.1));
+  color: var(--mantine-color-brand-7);
+}
+[data-mantine-color-scheme="dark"] .app-nav .mantine-NavLink-root[data-active] {
+  background: linear-gradient(90deg, rgba(125, 135, 245, 0.2), rgba(155, 110, 243, 0.12));
+  color: var(--mantine-color-brand-3);
+}
+
+.app-navbar-footer {
+  padding: 12px 16px 16px;
+  border-top: 1px solid var(--mantine-color-default-border);
+}
+
+/* ---------- 卡片质感 ---------- */
+[data-mantine-color-scheme="light"] .mantine-Card-root[data-with-border],
+[data-mantine-color-scheme="light"] .app-panel {
+  border: 1px solid rgba(230, 232, 240, 0.9);
+  box-shadow:
+    0 1px 2px rgba(16, 24, 40, 0.04),
+    0 2px 8px rgba(16, 24, 40, 0.03);
+}
+
+.app-card-hover {
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+  cursor: pointer;
+}
+.app-card-hover:hover {
+  transform: translateY(-2px);
+  box-shadow:
+    0 4px 6px rgba(16, 24, 40, 0.05),
+    0 10px 24px rgba(16, 24, 40, 0.08) !important;
+}
+
+/* ---------- 页面头部 ---------- */
+.app-page-icon {
+  width: 44px;
+  height: 44px;
+  border-radius: 13px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+[data-mantine-color-scheme="light"] .app-page-icon {
+  background: rgba(125, 135, 245, 0.12);
+  color: var(--mantine-color-brand-7);
+}
+[data-mantine-color-scheme="dark"] .app-page-icon {
+  background: rgba(125, 135, 245, 0.16);
+  color: var(--mantine-color-brand-3);
+}
+
+/* ---------- 统计卡片 ---------- */
+.app-stat-value {
+  font-size: 30px;
+  font-weight: 700;
+  line-height: 1.1;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
+}
+
+/* ---------- 表格 ---------- */
+[data-mantine-color-scheme="light"] .mantine-Table-thead {
+  background: var(--mantine-color-gray-0);
+}
+[data-mantine-color-scheme="dark"] .mantine-Table-thead {
+  background: rgba(255, 255, 255, 0.04);
+}
+.mantine-Table-th {
+  font-size: var(--mantine-font-size-xs);
+  text-transform: none;
+  letter-spacing: 0.02em;
+  color: var(--mantine-color-dimmed);
+  font-weight: 600;
+}
+
+/* ---------- 掌握度条形 ---------- */
+.app-bar-track {
+  height: 8px;
+  border-radius: 999px;
+  overflow: hidden;
+  flex: 1;
+}
+[data-mantine-color-scheme="light"] .app-bar-track {
+  background: var(--mantine-color-gray-2);
+}
+[data-mantine-color-scheme="dark"] .app-bar-track {
+  background: rgba(255, 255, 255, 0.08);
+}
+.app-bar-fill {
+  height: 100%;
+  border-radius: 999px;
+  transition: width 0.4s ease;
+}
+
+/* ---------- 答案/解析面板 ---------- */
+.app-answer-panel {
+  border-radius: 10px;
+  padding: 12px 16px;
+}
+[data-mantine-color-scheme="light"] .app-answer-panel {
+  background: rgba(12, 166, 109, 0.07);
+  border: 1px solid rgba(12, 166, 109, 0.2);
+}
+[data-mantine-color-scheme="dark"] .app-answer-panel {
+  background: rgba(12, 166, 109, 0.09);
+  border: 1px solid rgba(12, 166, 109, 0.28);
+}
+
+/* ---------- 空状态 ---------- */
+.app-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 56px 24px;
+  text-align: center;
+  border: 1.5px dashed var(--mantine-color-default-border);
+  border-radius: var(--mantine-radius-md);
+}
+
+/* ---------- 导入步骤 ---------- */
+.app-step {
+  width: 26px;
+  height: 26px;
+  border-radius: 999px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  font-weight: 700;
+  flex-shrink: 0;
+  background: rgba(125, 135, 245, 0.14);
+  color: var(--mantine-color-brand-7);
+}
+[data-mantine-color-scheme="dark"] .app-step {
+  color: var(--mantine-color-brand-3);
+}
+
+/* ---------- 滚动条 ---------- */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--mantine-color-default-border) transparent;
+}
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+*::-webkit-scrollbar-thumb {
+  background: var(--mantine-color-default-border);
+  border-radius: 999px;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* KaTeX 公式与正文基线对齐、允许换行 */
+.katex-display {
+  margin: 0.4em 0;
+}
