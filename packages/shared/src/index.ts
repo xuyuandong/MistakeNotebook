@@ -3,3 +3,4 @@ export * from "./doubao.js";
 export * from "./figure.js";
 export * from "./rest.js";
 export * from "./ai.js";
+export * from "./frontmatter.js";

@@ -16,6 +16,7 @@ server/           # Fastify + TypeScript + Drizzle + SQLite(WAL) 模块化单体
 web/              # React + Vite + Mantine + PWA(登录页与页面骨架已就位)
 packages/shared/  # 前后端共用 Zod 契约(REST DTO + AI 输出/豆包导入 Schema)
 config/           # models.yaml:text_model 槽位(识题已外移至豆包,见 docs)
+llm_prompts/      # 全部提示词唯一真源(含豆包识题模板;启动时加载,详见其 README)
 evals/            # AI 黄金评测集(阶段 0 起填充)
 data/             # 运行时数据(gitignore):app.db 与 AI 原始输出
 ```

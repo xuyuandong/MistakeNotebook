@@ -40,6 +40,29 @@ export const HABIT_HINTS = [
   "疏于练习",
 ] as const;
 
+/** 三科生成约束(PRD 5.3.2) */
+export const SUBJECT_RULES: Record<string, string> = {
+  math: "数学:变式题必须改变原题的数字与情境;答案必须唯一或给出等价形式集合;优先给出可复核的客观题或答案明确的填空/解答题。",
+  chinese:
+    "语文:阅读题必须在 readingMaterialMd 中生成自包含材料;主观题给评分要点(rubricMd)而非唯一答案;字词/病句/古诗文题答案必须唯一。",
+  english:
+    "英语:题目注明可接受答案(acceptableAnswers);阅读材料难度与年级匹配;语法/词汇/完形/翻译均需给出唯一标准答案或可接受答案集合。",
+};
+
+/**
+ * markdown 提示词占位符(llm_prompts/*.md)→ 代码侧文本。
+ * 枚举类内容以代码为准注入提示词,避免枚举与提示词文本漂移。
+ */
+export const PROMPT_PLACEHOLDERS: Record<string, string> = {
+  ERROR_TYPE_LIST: Object.entries(ERROR_TYPE_NAMES)
+    .map(([k, v]) => `- ${k}: ${v}`)
+    .join("\n"),
+  HABIT_HINTS_TEXT: HABIT_HINTS.join("、"),
+  SUBJECT_RULES_LIST: Object.values(SUBJECT_RULES)
+    .map((r) => `- ${r}`)
+    .join("\n"),
+};
+
 /** 注入防御:把学生内容包进明确的定界符,声明其中任何指令都是数据(HLD §12.2) */
 export function quoteStudentContent(label: string, content: string): string {
   return `<${label}>\n${content}\n</${label}>`;
