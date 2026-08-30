@@ -11,8 +11,8 @@ import {
 } from "../src/services/mistakes.js";
 import { createDb, type Db } from "../src/db/client.js";
 import { runMigrations } from "../src/db/migrator.js";
-import { importBatches, ingestionDrafts, learningEvents, mistakeConcepts, mistakes } from "../src/db/schema.js";
-import { resolveOrCreateConcept } from "../src/services/concepts.js";
+import { attempts, concepts, importBatches, ingestionDrafts, learningEvents, mistakeConcepts, mistakes } from "../src/db/schema.js";
+import { resolveCategory, resolveOrCreateConcept } from "../src/services/concepts.js";
 
 const MIGRATIONS_DIR = fileURLToPath(new URL("../migrations", import.meta.url));
 
@@ -74,6 +74,55 @@ describe("错题服务", () => {
     const hits = listMistakes(db, "u_local", { q: "解方程" });
     expect(hits.total).toBe(1);
     expect(hits.items[0].excerpt).toContain("解方程");
+  });
+
+  test("列表可按分类/概念筛出从未提交错题复习的未归档题目", () => {
+    const db = freshDb();
+    const first = createMistake(db, "u_local", manualInput).id;
+    const second = createMistake(db, "u_local", {
+      ...manualInput,
+      content: { ...manualInput.content, stemMd: "解方程 $2x=4$" },
+    }).id;
+    const categoryId = resolveCategory(db, "u_local", "math", "一元一次方程");
+    const conceptId = resolveOrCreateConcept(
+      db,
+      "u_local",
+      "math",
+      "移项",
+      first,
+      0.9,
+      "一元一次方程",
+    );
+    for (const mistakeId of [first, second]) {
+      db.insert(mistakeConcepts).values({
+        id: crypto.randomUUID(),
+        mistakeId,
+        conceptId,
+        mistakeVersion: 1,
+        isPrimary: 1,
+        createdAt: new Date().toISOString(),
+      }).run();
+    }
+    db.insert(attempts).values({
+      id: crypto.randomUUID(),
+      userId: "u_local",
+      sourceType: "mistake_review",
+      sourceId: first,
+      result: "wrong",
+      createdAt: new Date().toISOString(),
+    }).run();
+
+    const byCategory = listMistakes(db, "u_local", { categoryId, unpracticed: true });
+    expect(byCategory.total).toBe(1);
+    expect(byCategory.items.map((m) => m.id)).toEqual([second]);
+    const byConcept = listMistakes(db, "u_local", { conceptId, unpracticed: true });
+    expect(byConcept.items.map((m) => m.id)).toEqual([second]);
+
+    // 已归档题不属于学习分析的待练习口径。
+    db.update(mistakes).set({ archived: 1 }).where(eq(mistakes.id, second)).run();
+    expect(listMistakes(db, "u_local", { categoryId, unpracticed: true }).total).toBe(0);
+    expect(db.select().from(concepts).where(eq(concepts.id, conceptId)).get()?.categoryId)
+      .toBe(categoryId);
   });
 
   test("waiting_input:无学生答案时不得臆测,进入待补充", () => {

@@ -1,4 +1,4 @@
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, isNull } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import {
   conceptAliases,
@@ -19,6 +19,52 @@ import { recomputeMasteryForConcept } from "./mastery.js";
  */
 
 const nowIso = () => new Date().toISOString();
+
+/**
+ * 分类名和未分类概念名完全相同时,二者在分类聚合视图中会显示成同名两行。
+ * 将该叶子概念挂入分类即可保留概念 ID/证据,同时维持展示名称唯一。
+ */
+function attachSameNameConcept(
+  db: Db,
+  userId: string,
+  subject: Subject,
+  categoryName: string,
+  categoryId: string,
+): void {
+  db.update(concepts)
+    .set({ categoryId, updatedAt: nowIso() })
+    .where(
+      and(
+        eq(concepts.userId, userId),
+        eq(concepts.subject, subject),
+        eq(concepts.canonicalName, categoryName),
+        eq(concepts.status, "active"),
+        isNull(concepts.categoryId),
+      ),
+    )
+    .run();
+}
+
+/** 只解析已经存在的同名分类;不存在时返回 null,避免给每个叶子概念创建自分类。 */
+function resolveMatchingCategory(
+  db: Db,
+  userId: string,
+  subject: Subject,
+  conceptName: string,
+): string | null {
+  const matching = db
+    .select()
+    .from(conceptCategories)
+    .where(
+      and(
+        eq(conceptCategories.userId, userId),
+        eq(conceptCategories.subject, subject),
+        eq(conceptCategories.canonicalName, conceptName),
+      ),
+    )
+    .get();
+  return matching ? resolveCategory(db, userId, subject, conceptName) : null;
+}
 
 /**
  * 两级标签(用户 2026-08-30 决策):概念分类是元信息层,按学科维护受控词表。
@@ -55,11 +101,15 @@ export function resolveCategory(
           .from(conceptCategories)
           .where(and(eq(conceptCategories.id, targetId), eq(conceptCategories.userId, userId)))
           .get();
-        if (!target || target.status === "active" || !target.mergedIntoId) return targetId;
+        if (!target || target.status === "active" || !target.mergedIntoId) {
+          attachSameNameConcept(db, userId, subject, normalized, targetId);
+          return targetId;
+        }
         targetId = target.mergedIntoId;
       }
       throw new Error("分类合并历史存在循环");
     }
+    attachSameNameConcept(db, userId, subject, normalized, existing.id);
     return existing.id;
   }
   const id = randomUUID();
@@ -80,6 +130,7 @@ export function resolveCategory(
     )
     .get();
   if (!created) throw new Error("分类创建失败");
+  attachSameNameConcept(db, userId, subject, normalized, created.id);
   return created.id;
 }
 
@@ -102,7 +153,10 @@ export function listCategoriesForSubject(
     .slice(0, limit);
 }
 
-/** 把概念改挂分类(拆分/重组用):直接覆盖;categoryName 为空视作清除 */
+/**
+ * 把概念改挂分类(拆分/重组用):直接覆盖。
+ * categoryName 为空通常清除;若存在同学科同名 active 分类则仍归入该分类,避免同名聚合行。
+ */
 export function assignCategory(
   db: Db,
   userId: string,
@@ -115,7 +169,9 @@ export function assignCategory(
     .where(and(eq(concepts.id, conceptId), eq(concepts.userId, userId)))
     .get();
   if (!concept) throw new Error("概念不存在");
-  const categoryId = categoryName?.trim() ? resolveCategory(db, userId, concept.subject as Subject, categoryName) : null;
+  const categoryId = categoryName?.trim()
+    ? resolveCategory(db, userId, concept.subject as Subject, categoryName)
+    : resolveMatchingCategory(db, userId, concept.subject as Subject, concept.canonicalName);
   db.update(concepts)
     .set({ categoryId, updatedAt: nowIso() })
     .where(eq(concepts.id, conceptId))
@@ -172,9 +228,13 @@ export function resolveOrCreateConcept(
 
   /** 命中已有概念时:无分类才填入模型建议的分类,已有分类保持不变 */
   const fillCategory = (conceptId: string, currentCategoryId: string | null | undefined) => {
-    if (!category?.trim() || currentCategoryId) return;
+    if (currentCategoryId) return;
+    const categoryId = category?.trim()
+      ? resolveCategory(db, userId, subject, category)
+      : resolveMatchingCategory(db, userId, subject, normalized);
+    if (!categoryId) return;
     db.update(concepts)
-      .set({ categoryId: resolveCategory(db, userId, subject, category), updatedAt: nowIso() })
+      .set({ categoryId, updatedAt: nowIso() })
       .where(eq(concepts.id, conceptId))
       .run();
   };
@@ -216,13 +276,16 @@ export function resolveOrCreateConcept(
   function createConcept(): string {
     const id = randomUUID();
     const now = nowIso();
+    const categoryId = category?.trim()
+      ? resolveCategory(db, userId, subject, category)
+      : resolveMatchingCategory(db, userId, subject, normalized);
     db.insert(concepts)
       .values({
         id,
         userId,
         subject,
         canonicalName: normalized,
-        categoryId: category?.trim() ? resolveCategory(db, userId, subject, category) : null,
+        categoryId,
         status: "active",
         discoveredFromMistakeId: discoveredFromMistakeId ?? null,
         createdAt: now,
@@ -251,6 +314,9 @@ export function resolveOrCreateConcept(
 
 /** 概念改名;同时把旧名记为别名,保留历史(PRD 5.2.3) */
 export function renameConcept(db: Db, userId: string, conceptId: string, newName: string): void {
+  const normalized = newName.trim().slice(0, 100);
+  if (!normalized) throw new Error("概念名不能为空");
+  let subject: Subject | null = null;
   db.transaction((tx) => {
     const c = tx
       .select()
@@ -258,6 +324,7 @@ export function renameConcept(db: Db, userId: string, conceptId: string, newName
       .where(and(eq(concepts.id, conceptId), eq(concepts.userId, userId)))
       .get();
     if (!c) throw new Error("概念不存在");
+    subject = c.subject as Subject;
     const old = c.canonicalName;
     tx.insert(conceptAliases)
       .values({
@@ -271,10 +338,12 @@ export function renameConcept(db: Db, userId: string, conceptId: string, newName
       .onConflictDoNothing()
       .run();
     tx.update(concepts)
-      .set({ canonicalName: newName.trim().slice(0, 100), updatedAt: new Date().toISOString() })
+      .set({ canonicalName: normalized, updatedAt: new Date().toISOString() })
       .where(eq(concepts.id, conceptId))
       .run();
   });
+  // 改名也可能与 active 分类同名;复用正常解析路径补齐分类,不改变概念 ID。
+  if (subject) resolveOrCreateConcept(db, userId, subject, normalized);
 }
 
 /**

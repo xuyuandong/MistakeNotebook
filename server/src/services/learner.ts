@@ -121,6 +121,17 @@ export function analytics(db: Db, userId: string) {
     .all()
     .filter((m) => m.userId === userId && m.archived === 0);
   const mistakeById = new Map(mistakeRows.map((m) => [m.id, m]));
+  // “已练习”只认原错题复习的实际提交;编新题作答不替代原错题练习。
+  // pending_judge 也已经完成提交,因此任意结果状态都视为练习过。
+  const practicedMistakeIds = new Set(
+    db
+      .select({ sourceId: attempts.sourceId, sourceType: attempts.sourceType })
+      .from(attempts)
+      .where(eq(attempts.userId, userId))
+      .all()
+      .filter((a) => a.sourceType === "mistake_review")
+      .map((a) => a.sourceId),
+  );
   const conceptMistakes = new Map<string, Set<string>>();
   for (const link of db.select().from(mistakeConcepts).all()) {
     if (!mistakeById.has(link.mistakeId)) continue;
@@ -135,6 +146,9 @@ export function analytics(db: Db, userId: string) {
       .all()
       .filter((c) => c.userId === userId && c.status === "active")
       .map((c) => [c.id, c]),
+  );
+  const categoryIdByName = new Map(
+    [...categories.values()].map((c) => [`${c.subject}\u0000${c.canonicalName}`, c.id]),
   );
   const graduatedCache = new Map<string, boolean>();
   const graduated = (mistakeId: string) => {
@@ -157,12 +171,17 @@ export function analytics(db: Db, userId: string) {
         conceptId: c.id,
         name: c.canonicalName,
         subject: c.subject,
-        categoryId: c.categoryId && categories.has(c.categoryId) ? c.categoryId : null,
+        // 查询兜底:旧库或绕过服务层的写入若留下“分类 = 未分类概念”同名冲突,
+        // 仍按该分类聚合,避免丢弃任一侧证据或在 Dashboard 显示两行同名项。
+        categoryId: c.categoryId && categories.has(c.categoryId)
+          ? c.categoryId
+          : categoryIdByName.get(`${c.subject}\u0000${c.canonicalName}`) ?? null,
         score: m?.score ?? 50,
         sampleCount: m?.sampleCount ?? 0,
         lastPracticedAt: m?.lastPracticedAt ?? null,
         mistakeIds: linked,
         mistakeCount: linked.size,
+        pendingPracticeCount: [...linked].filter((id) => !practicedMistakeIds.has(id)).length,
         graduatedCount: [...linked].filter(graduated).length,
         insufficient: (m?.sampleCount ?? 0) < 3,
       };
@@ -179,7 +198,7 @@ export function analytics(db: Db, userId: string) {
     groups.set(key, grouped);
   }
 
-  // 服务端返回全部分类聚合行(按掌握分升序),Top N 由前端按学科切片。
+  // 服务端返回全部分类聚合行(待练习数降序,同数按掌握分升序),Top N 由前端按学科切片。
   const weaknessesFinal = [...groups.entries()]
     .map(([groupId, grouped]) => {
       const first = grouped[0];
@@ -198,20 +217,31 @@ export function analytics(db: Db, userId: string) {
       const category = first.categoryId ? categories.get(first.categoryId) : null;
       return {
         conceptId: groupId,
+        categoryId: category?.id ?? null,
         name: category?.canonicalName ?? first.name,
         subject: first.subject,
         score,
         sampleCount,
         lastPracticedAt: practiced,
         mistakeCount: mistakeIds.size,
+        pendingPracticeCount: [...mistakeIds]
+          .filter((id) => !practicedMistakeIds.has(id)).length,
         graduatedCount: [...mistakeIds].filter(graduated).length,
         insufficient: sampleCount < 3,
         members: grouped
           .map(({ mistakeIds: _mistakeIds, categoryId: _categoryId, ...member }) => member)
-          .sort((a, b) => a.score - b.score || a.name.localeCompare(b.name, "zh-Hans-CN")),
+          .sort(
+            (a, b) => b.pendingPracticeCount - a.pendingPracticeCount
+              || a.score - b.score
+              || a.name.localeCompare(b.name, "zh-Hans-CN"),
+          ),
       };
     })
-    .sort((a, b) => a.score - b.score || a.name.localeCompare(b.name, "zh-Hans-CN"));
+    .sort(
+      (a, b) => b.pendingPracticeCount - a.pendingPracticeCount
+        || a.score - b.score
+        || a.name.localeCompare(b.name, "zh-Hans-CN"),
+    );
 
   const since = new Date(Date.now() - 30 * 86_400_000).toISOString();
   const errorTypeCounts = new Map<string, number>();

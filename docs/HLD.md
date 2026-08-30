@@ -454,11 +454,12 @@ MVP 不必立即使用向量数据库。先按以下顺序检索：
 不加载教材目录，也不预先创建完整知识点树。知识概念由错题逐步产生：
 
 1. 豆包的 `suggested_concepts` 只作为参考；程序内分析模型输出 `category + name + evidence + confidence`，不接收可执行指令；
-2. 分析调用输入该生该学科最多 80 个 active 分类，模型必须优先复用已有中粒度分类，确无合适项才创建；服务端精确解析分类，已有概念的 `category_id` 不被模型覆盖；
+2. 分析调用输入该生该学科最多 80 个 active 分类，模型必须优先复用已有中粒度分类，确无合适项才创建；服务端精确解析分类，已有概念的 `category_id` 不被模型覆盖；同一学生、学科下，active 分类与未分类概念规范名完全相同时，概念自动改挂该分类，保留原概念 ID 与全部关联；
 3. 具体概念先匹配规范名称和别名，命中则复用，否则创建待确认概念；错题关联保存概念 ID，改名/改挂自动反映；
 4. 分类合并会把成员整体改挂目标分类，旧分类保留 `merged_into_id`；概念合并迁移错题关联并从事实源重算掌握度，旧概念同样保留合并历史；
 5. 手动整理命令调用 `consolidate@1` 生成归类/归并建议，所有 ID 做用户与学科校验，终端逐条 `y/N` 确认后才应用；
-6. 掌握度只计算有真实错题或作答证据的叶子概念；Dashboard 按分类聚合，错题取成员并集、样本求和、掌握分按样本加权，成员可展开。
+6. 掌握度只计算有真实错题或作答证据的叶子概念；Dashboard 按分类聚合，错题取成员并集、样本求和、掌握分按样本加权，成员可展开；“待练习”取成员关联未归档错题并集减去已有任意 `mistake_review` 提交的错题，按待练习数降序、掌握分升序；数字链接到错题库的 `categoryId`/`conceptId + unpracticed` 服务端筛选，筛选查询必须继续校验用户归属；查询层按同学科同规范名提供只读归类兜底，历史异常数据也不能产生同名两行或丢失任一侧证据；
+7. `0011_reconcile_category_name_collisions.sql` 向前迁移只补齐上述同名概念的 `category_id`，不合并或删除记录。升级前按 §4.3 生成 `app.db` 一致备份；若需恢复，停止 API 后以该备份替换数据库文件再启动，迁移执行器会按 `_migrations` 水位恢复到备份状态。
 
 新增表：
 
@@ -516,12 +517,12 @@ erDiagram
 | `GET` | `/api/v1/ingestion-drafts/{id}` | 获取导入草稿 |
 | `GET` | `/api/v1/ingestion-drafts` | 草稿箱列表 |
 | `POST` | `/api/v1/mistakes` | 保存确认后的错题 |
-| `GET` | `/api/v1/mistakes` | 搜索与筛选 |
+| `GET` | `/api/v1/mistakes` | 搜索与筛选；支持按学科、分类或叶子概念筛选，以及 `unpracticed`（未归档且从未提交错题复习）口径 |
 | `GET/PATCH/DELETE` | `/api/v1/mistakes/{id}` | 详情、修改、删除 |
 | `POST` | `/api/v1/practice-sets` | 创建智能练习（学科 + 旧题/新题开关） |
 | `GET` | `/api/v1/practice-sets/{id}` | 获取选题分析、生成进度与题目 |
 | `POST` | `/api/v1/questions/{id}/reports` | 举报问题题 |
-| `GET` | `/api/v1/analytics/weaknesses` | 学习分析:全部活跃分类聚合薄弱点(含可展开成员、错题去重并集/毕业数/样本加权掌握分,前端按学科与 Top N 切片)、分学科统计、错误类型与习惯画像 |
+| `GET` | `/api/v1/analytics/weaknesses` | 学习分析:全部活跃分类聚合薄弱点(含可展开成员、错题去重并集/毕业数/待练习数/样本加权掌握分，按待练习数降序，前端按学科与 Top N 切片)、分学科统计、错误类型与习惯画像 |
 | `GET` | `/api/v1/learner-profile` | 获取结构化学习状态与长期摘要 |
 | `POST` | `/api/v1/learner-profile/refresh` | 创建批量学生分析与总结任务 |
 | `GET` | `/api/v1/reviews/today` | 今日复习 |

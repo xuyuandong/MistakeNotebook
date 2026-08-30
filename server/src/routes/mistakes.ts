@@ -33,6 +33,9 @@ export async function listMistakesHandler(req: FastifyRequest) {
     subject?: string;
     status?: string;
     q?: string;
+    conceptId?: string;
+    categoryId?: string;
+    unpracticed?: string;
     limit?: string;
     offset?: string;
   };
@@ -40,6 +43,9 @@ export async function listMistakesHandler(req: FastifyRequest) {
     subject: q.subject,
     status: q.status,
     q: q.q,
+    conceptId: q.conceptId,
+    categoryId: q.categoryId,
+    unpracticed: q.unpracticed === "1" || q.unpracticed === "true",
     limit: q.limit ? Number(q.limit) : undefined,
     offset: q.offset ? Number(q.offset) : undefined,
   });

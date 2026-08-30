@@ -105,6 +105,7 @@ describe("迁移", () => {
       "0008_revival_toggle.sql",
       "0009_concept_categories.sql",
       "0010_consolidate_model_runs.sql",
+      "0011_reconcile_category_name_collisions.sql",
     ]);
     const cols = (
       sqlite.prepare("PRAGMA table_info(users)").all() as { name: string }[]
@@ -166,6 +167,7 @@ describe("迁移", () => {
     expect(runMigrations(sqlite, MIGRATIONS_DIR)).toEqual([
       "0009_concept_categories.sql",
       "0010_consolidate_model_runs.sql",
+      "0011_reconcile_category_name_collisions.sql",
     ]);
 
     const cats = sqlite
@@ -187,6 +189,54 @@ describe("迁移", () => {
     expect(catOf("c3")).toBe("词汇辨析");
     expect(catOf("c4")).toBeUndefined();
     expect(catOf("c5")).toBeUndefined();
+  });
+
+  test("v0.6 修复:同名未分类概念改挂 active 分类且 ID 级错题关联不变", () => {
+    const sqlite = freshDb();
+    const files = readdirSync(MIGRATIONS_DIR).filter((f) => f.endsWith(".sql")).sort();
+    const older = files.filter((f) => f < "0011_reconcile_category_name_collisions.sql");
+    sqlite.exec("CREATE TABLE _migrations (id TEXT PRIMARY KEY, applied_at TEXT NOT NULL)");
+    for (const f of older) {
+      sqlite.exec(readFileSync(join(MIGRATIONS_DIR, f), "utf8"));
+      sqlite.prepare("INSERT INTO _migrations (id, applied_at) VALUES (?, ?)")
+        .run(f, "2026-08-30T00:00:00Z");
+    }
+
+    const now = "2026-08-30T00:00:00Z";
+    sqlite.prepare(
+      `INSERT INTO concept_categories
+       (id, user_id, subject, canonical_name, status, created_at, updated_at)
+       VALUES ('cat-equation', 'u_local', 'math', '解一元一次方程', 'active', ?, ?)`,
+    ).run(now, now);
+    sqlite.prepare(
+      `INSERT INTO concepts
+       (id, user_id, subject, canonical_name, status, category_id, created_at, updated_at)
+       VALUES
+       ('c-generic', 'u_local', 'math', '解一元一次方程', 'active', NULL, ?, ?),
+       ('c-specific', 'u_local', 'math', '解一元一次方程：去分母', 'active', 'cat-equation', ?, ?),
+       ('c-other-subject', 'u_local', 'english', '解一元一次方程', 'active', NULL, ?, ?)`,
+    ).run(now, now, now, now, now, now);
+    sqlite.prepare(
+      `INSERT INTO mistakes (id, user_id, subject, status, created_at, updated_at)
+       VALUES ('m1', 'u_local', 'math', 'analyzed', ?, ?)`,
+    ).run(now, now);
+    sqlite.prepare(
+      `INSERT INTO mistake_concepts
+       (id, mistake_id, concept_id, mistake_version, is_primary, created_at)
+       VALUES ('mc1', 'm1', 'c-generic', 1, 1, ?)`,
+    ).run(now);
+
+    expect(runMigrations(sqlite, MIGRATIONS_DIR))
+      .toEqual(["0011_reconcile_category_name_collisions.sql"]);
+    expect(
+      sqlite.prepare("SELECT category_id FROM concepts WHERE id='c-generic'").get(),
+    ).toMatchObject({ category_id: "cat-equation" });
+    expect(
+      sqlite.prepare("SELECT category_id FROM concepts WHERE id='c-other-subject'").get(),
+    ).toMatchObject({ category_id: null });
+    expect(
+      sqlite.prepare("SELECT concept_id FROM mistake_concepts WHERE id='mc1'").get(),
+    ).toMatchObject({ concept_id: "c-generic" });
   });
 
   test("v0.5:revival_enabled 默认 0(复活开关默认关闭)", () => {

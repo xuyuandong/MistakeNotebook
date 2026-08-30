@@ -7,6 +7,7 @@ import {
   assignCategory,
   mergeCategories,
   mergeConcepts,
+  renameConcept,
   resolveCategory,
   resolveOrCreateConcept,
 } from "../src/services/concepts.js";
@@ -32,6 +33,33 @@ describe("两级概念标签服务", () => {
 
     resolveOrCreateConcept(db, "u_local", "english", "keep cool", undefined, 0.8, "词汇辨析");
     expect(db.select().from(concepts).where(eq(concepts.id, conceptId)).get()?.categoryId).toBe(categoryId);
+  });
+
+  test("同名分类与未分类概念无论创建顺序如何都会自动归为一组", () => {
+    const db = freshDb();
+
+    const conceptFirst = resolveOrCreateConcept(db, "u_local", "math", "解一元一次方程");
+    const categoryAfter = resolveCategory(db, "u_local", "math", "解一元一次方程");
+    expect(db.select().from(concepts).where(eq(concepts.id, conceptFirst)).get()?.categoryId)
+      .toBe(categoryAfter);
+
+    const categoryFirst = resolveCategory(db, "u_local", "english", "固定搭配");
+    const conceptAfter = resolveOrCreateConcept(db, "u_local", "english", "固定搭配");
+    expect(db.select().from(concepts).where(eq(concepts.id, conceptAfter)).get()?.categoryId)
+      .toBe(categoryFirst);
+
+    // 没有同名分类时仍保持普通叶子概念,不能为每个概念创建自分类。
+    const standalone = resolveOrCreateConcept(db, "u_local", "chinese", "病句辨析");
+    expect(db.select().from(concepts).where(eq(concepts.id, standalone)).get()?.categoryId).toBeNull();
+    expect(
+      db.select().from(conceptCategories).all()
+        .some((c) => c.subject === "chinese" && c.canonicalName === "病句辨析"),
+    ).toBe(false);
+
+    const renameCategory = resolveCategory(db, "u_local", "chinese", "古诗鉴赏");
+    renameConcept(db, "u_local", standalone, "古诗鉴赏");
+    expect(db.select().from(concepts).where(eq(concepts.id, standalone)).get()?.categoryId)
+      .toBe(renameCategory);
   });
 
   test("分类合并整体改挂成员并保留 merged_into_id;拆分可逐条改挂", () => {

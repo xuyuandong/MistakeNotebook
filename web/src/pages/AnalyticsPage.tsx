@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { Link } from "react-router-dom";
 import {
   Badge,
   Card,
@@ -30,14 +31,18 @@ import { EmptyState, StatCard, CountBar, SUBJECT_LABELS, SUBJECT_COLORS } from "
 
 interface Weakness {
   conceptId: string;
+  /** 分类聚合行的分类 ID;null 表示无分类叶子概念 */
+  categoryId: string | null;
   name: string;
   subject: string;
   score: number;
-  /** 练习量:计入掌握度的作答样本数 */
+  /** 计入掌握度的作答样本数(只用于分数与“数据不足”判断,不作为待练习题数) */
   sampleCount: number;
   lastPracticedAt: string | null;
   /** 关联未归档错题总数 */
   mistakeCount: number;
+  /** 关联未归档错题中,从未提交过错题复习作答的去重题目数 */
+  pendingPracticeCount: number;
   /** 已毕业错题数(掌握程度 = 毕业/总数) */
   graduatedCount: number;
   insufficient: boolean;
@@ -45,7 +50,7 @@ interface Weakness {
   members: WeaknessMember[];
 }
 
-type WeaknessMember = Omit<Weakness, "members">;
+type WeaknessMember = Omit<Weakness, "members" | "categoryId">;
 
 interface SubjectStat {
   subject: string;
@@ -63,7 +68,7 @@ interface SubjectStat {
 }
 
 interface Analytics {
-  /** 全部活跃分类聚合行(按掌握分升序),前端按学科与 Top N 切片 */
+  /** 全部活跃分类聚合行(按待练习数降序),前端按学科与 Top N 切片 */
   weaknesses: Weakness[];
   /** 按学科分组的错误类型计数(最近 30 天) */
   errorTypes: { subject: string; errorType: string; count: number }[];
@@ -117,6 +122,22 @@ const TOP_N_OPTIONS = [
   { value: "50", label: "Top 50" },
   { value: "all", label: "全部" },
 ];
+
+function pendingPracticeUrl(input: {
+  subject: string;
+  name: string;
+  conceptId: string;
+  categoryId?: string | null;
+}): string {
+  const params = new URLSearchParams({
+    subject: input.subject,
+    unpracticed: "1",
+    weaknessName: input.name,
+  });
+  if (input.categoryId) params.set("categoryId", input.categoryId);
+  else params.set("conceptId", input.conceptId);
+  return `/mistakes?${params.toString()}`;
+}
 
 /** 按学科过滤错误类型计数(全部 = 跨学科求和),输出按数量降序 */
 function errorTypeRows(
@@ -462,7 +483,7 @@ export function AnalyticsPage() {
 
         {/* ============ 下段:分学科情况 ============ */}
         {sectionLabel("分学科情况", "以下所有视图只显示当前学科")}
-        <Group justify="space-between" align="center">
+        <Stack gap="xs">
           <Text size="sm" c="dimmed">
             当前学科:{SUBJECT_LABELS[activeSubject] ?? activeSubject}
             {subjectStat && subjectStat.mistakeTotal > 0
@@ -470,12 +491,25 @@ export function AnalyticsPage() {
               : " · 暂无错题数据"}
           </Text>
           <SegmentedControl
-            size="xs"
+            size="md"
+            radius="md"
+            fullWidth
             value={activeSubject}
             onChange={(v) => setSubject(v)}
             data={SUBJECT_SEGMENT}
+            aria-label="切换学习分析学科"
+            styles={{
+              label: {
+                minHeight: 52,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                fontSize: 16,
+                fontWeight: 700,
+              },
+            }}
           />
-        </Group>
+        </Stack>
 
         {/* 学科总结 */}
         <Card
@@ -567,7 +601,7 @@ export function AnalyticsPage() {
             />
           </Group>
           <Text size="xs" c="dimmed" mb="md">
-            分类按已有体系聚合;可展开查看具体知识点。错题按题目去重,掌握=已毕业/总数,练习=作答样本(&lt;3 数据不足)
+            分类按已有体系聚合;可展开查看具体知识点。错题按题目去重,掌握=已毕业/总数,待练习=从未提交过错题复习的题目;按待练习数降序(&lt;3 次作答样本仍显示数据不足)
             {subjectWeaknesses.length > 0 &&
               ` · 该科共 ${subjectWeaknesses.length} 个知识点,当前显示 ${shownWeaknesses.length} 个`}
           </Text>
@@ -593,8 +627,8 @@ export function AnalyticsPage() {
                 <Text size="xs" c="dimmed" w={56} ta="right" style={{ flexShrink: 0 }}>
                   掌握
                 </Text>
-                <Text size="xs" c="dimmed" w={44} ta="right" style={{ flexShrink: 0 }}>
-                  练习
+                <Text size="xs" c="dimmed" w={58} ta="right" style={{ flexShrink: 0 }}>
+                  待练习
                 </Text>
               </Group>
               {shownWeaknesses.map((w, i) => {
@@ -617,9 +651,9 @@ export function AnalyticsPage() {
                       <WeaknessRow
                         name={w.name}
                         score={w.score}
-                        sampleCount={w.sampleCount}
                         mistakeCount={w.mistakeCount}
                         graduatedCount={w.graduatedCount}
+                        pendingPracticeCount={w.pendingPracticeCount}
                         insufficient={w.insufficient}
                         barColor={barColor}
                         expandable={expandable}
@@ -633,6 +667,12 @@ export function AnalyticsPage() {
                             return next;
                           });
                         }}
+                        pendingPracticeHref={pendingPracticeUrl({
+                          subject: w.subject,
+                          name: w.name,
+                          conceptId: w.conceptId,
+                          categoryId: w.categoryId,
+                        })}
                       />
                     </Group>
                     {expanded && w.members.map((member) => {
@@ -642,12 +682,17 @@ export function AnalyticsPage() {
                           <WeaknessRow
                             name={member.name}
                             score={member.score}
-                            sampleCount={member.sampleCount}
                             mistakeCount={member.mistakeCount}
                             graduatedCount={member.graduatedCount}
+                            pendingPracticeCount={member.pendingPracticeCount}
                             insufficient={member.insufficient}
                             barColor={memberColor}
                             detail
+                            pendingPracticeHref={pendingPracticeUrl({
+                              subject: member.subject,
+                              name: member.name,
+                              conceptId: member.conceptId,
+                            })}
                           />
                         </Group>
                       );
@@ -666,32 +711,34 @@ export function AnalyticsPage() {
 /**
  * 薄弱知识点单行:名称 + 掌握度进度条 + 状态 + 三列统计。
  * 错题 = 关联未归档错题数;掌握 = 已毕业/错题总数(毕业 = 复习连续答对退出排期);
- * 练习 = 计入掌握度的作答样本数。总量 − 毕业 = 待巩固数。
+ * 待练习 = 从未提交过 mistake_review 作答的关联未归档错题数,点击进入对应错题列表。
  */
 function WeaknessRow({
   name,
   score,
-  sampleCount,
   mistakeCount,
   graduatedCount,
+  pendingPracticeCount,
   insufficient,
   barColor,
   expandable = false,
   expanded = false,
   onToggle,
   detail = false,
+  pendingPracticeHref,
 }: {
   name: string;
   score: number;
-  sampleCount: number;
   mistakeCount: number;
   graduatedCount: number;
+  pendingPracticeCount: number;
   insufficient: boolean;
   barColor: string;
   expandable?: boolean;
   expanded?: boolean;
   onToggle?: () => void;
   detail?: boolean;
+  pendingPracticeHref: string;
 }) {
   return (
     <Group gap="md" wrap="nowrap" style={{ flex: 1 }}>
@@ -727,9 +774,32 @@ function WeaknessRow({
       >
         {graduatedCount}/{mistakeCount}
       </Text>
-      <Text size="xs" c="dimmed" w={44} ta="right" style={{ flexShrink: 0, fontVariantNumeric: "tabular-nums" }}>
-        {sampleCount}
-      </Text>
+      <Link
+        to={pendingPracticeHref}
+        aria-label={`查看${name}的 ${pendingPracticeCount} 道待练习错题`}
+        title="查看待练习错题"
+        style={{
+          width: 58,
+          minHeight: 28,
+          flexShrink: 0,
+          display: "inline-flex",
+          alignItems: "center",
+          justifyContent: "flex-end",
+          color: "inherit",
+          textDecoration: "none",
+        }}
+      >
+        <Text
+          component="span"
+          size="xs"
+          fw={700}
+          c={pendingPracticeCount > 0 ? "brand" : "dimmed"}
+          td="underline"
+          style={{ fontVariantNumeric: "tabular-nums" }}
+        >
+          {pendingPracticeCount}
+        </Text>
+      </Link>
     </Group>
   );
 }

@@ -252,7 +252,19 @@ export interface MistakeListItem {
 export function listMistakes(
   db: Db,
   userId: string,
-  filters: { subject?: string; status?: string; q?: string; limit?: number; offset?: number },
+  filters: {
+    subject?: string;
+    status?: string;
+    q?: string;
+    /** 叶子概念关联错题 */
+    conceptId?: string;
+    /** 分类全部成员关联错题 */
+    categoryId?: string;
+    /** 从未提交过 mistake_review 作答的未归档错题 */
+    unpracticed?: boolean;
+    limit?: number;
+    offset?: number;
+  },
 ): { items: MistakeListItem[]; total: number } {
   const limit = Math.min(filters.limit ?? 20, 100);
   const offset = filters.offset ?? 0;
@@ -263,6 +275,39 @@ export function listMistakes(
     conds.push(
       sql`id IN (SELECT mistake_id FROM mistakes_fts WHERE mistakes_fts MATCH ${filters.q})`,
     );
+  }
+  if (filters.conceptId) {
+    conds.push(sql`id IN (
+      SELECT mc.mistake_id
+      FROM mistake_concepts mc
+      JOIN concepts c ON c.id = mc.concept_id
+      WHERE mc.concept_id = ${filters.conceptId}
+        AND c.user_id = ${userId}
+        AND c.status = 'active'
+    )`);
+  }
+  if (filters.categoryId) {
+    conds.push(sql`id IN (
+      SELECT mc.mistake_id
+      FROM mistake_concepts mc
+      JOIN concepts c ON c.id = mc.concept_id
+      JOIN concept_categories k ON k.id = c.category_id
+      WHERE c.category_id = ${filters.categoryId}
+        AND c.user_id = ${userId}
+        AND c.status = 'active'
+        AND k.user_id = ${userId}
+        AND k.status = 'active'
+    )`);
+  }
+  if (filters.unpracticed) {
+    // 与学习分析口径一致:只看未归档错题;有任意一次错题复习提交即不再“待练习”。
+    conds.push(sql`archived = 0`);
+    conds.push(sql`NOT EXISTS (
+      SELECT 1 FROM attempts a
+      WHERE a.user_id = ${userId}
+        AND a.source_type = 'mistake_review'
+        AND a.source_id = mistakes.id
+    )`);
   }
   const where = sql.join(conds, sql` AND `);
 

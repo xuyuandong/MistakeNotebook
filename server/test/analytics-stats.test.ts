@@ -7,7 +7,7 @@ import { resolveCategory, resolveOrCreateConcept } from "../src/services/concept
 import { recomputeMasteryForConcept } from "../src/services/mastery.js";
 import { createDb, type Db } from "../src/db/client.js";
 import { runMigrations } from "../src/db/migrator.js";
-import { concepts, mastery, memoryFacts, mistakes } from "../src/db/schema.js";
+import { conceptCategories, concepts, mastery, memoryFacts, mistakes } from "../src/db/schema.js";
 import { GRADUATION_STREAK } from "@mistake-book/shared";
 
 const MIGRATIONS_DIR = fileURLToPath(new URL("../migrations", import.meta.url));
@@ -48,6 +48,7 @@ describe("学习分析统计(薄弱点三列 + 分学科统计)", () => {
 
     let weak = analytics(db, "u_local").weaknesses.find((w) => w.conceptId === c1)!;
     expect(weak.mistakeCount).toBe(2);
+    expect(weak.pendingPracticeCount).toBe(2);
     expect(weak.graduatedCount).toBe(0);
     expect(weak.sampleCount).toBe(0);
     expect(weak.insufficient).toBe(true);
@@ -58,6 +59,7 @@ describe("学习分析统计(薄弱点三列 + 分学科统计)", () => {
     }
     weak = analytics(db, "u_local").weaknesses.find((w) => w.conceptId === c1)!;
     expect(weak.mistakeCount).toBe(2);
+    expect(weak.pendingPracticeCount).toBe(1);
     expect(weak.graduatedCount).toBe(1);
     expect(weak.sampleCount).toBe(GRADUATION_STREAK);
     expect(weak.insufficient).toBe(false);
@@ -173,20 +175,69 @@ describe("学习分析统计(薄弱点三列 + 分学科统计)", () => {
     expect(group.conceptId).toBe(categoryId);
     expect(group.name).toBe("一元一次方程");
     expect(group.mistakeCount).toBe(2);
+    expect(group.pendingPracticeCount).toBe(2);
     expect(group.sampleCount).toBe(4);
     expect(group.score).toBe(65); // (20×1 + 80×3) / 4
     expect(group.insufficient).toBe(false);
     expect(group.members.map((m) => m.name).sort()).toEqual(["去分母", "移项"].sort());
+    expect(group.members.find((m) => m.conceptId === c1)?.pendingPracticeCount).toBe(1);
+    expect(group.members.find((m) => m.conceptId === c2)?.pendingPracticeCount).toBe(2);
   });
 
-  test("薄弱点返回全量(不再服务端切 Top 10),按掌握分升序;零证据概念被排除;习惯画像带学科", () => {
+  test("查询兜底:同名未分类概念与分类合为一行且不丢两侧证据", () => {
     const db = freshDb();
-    // 12 个概念,验证超过 10 也全部返回
+    const m1 = mkMistake(db, "math", "a1");
+    const m2 = mkMistake(db, "math", "b2");
+    const genericId = resolveOrCreateConcept(db, "u_local", "math", "解一元一次方程", m1);
+    linkConcept(db, m1, genericId);
+
+    // 直接写表模拟迁移前历史状态或绕过概念服务的异常写入。
+    const categoryId = crypto.randomUUID();
+    const now = new Date().toISOString();
+    db.insert(conceptCategories).values({
+      id: categoryId,
+      userId: "u_local",
+      subject: "math",
+      canonicalName: "解一元一次方程",
+      status: "active",
+      createdAt: now,
+      updatedAt: now,
+    }).run();
+    const specificId = resolveOrCreateConcept(
+      db,
+      "u_local",
+      "math",
+      "解一元一次方程：去分母",
+      m2,
+      0.8,
+      "解一元一次方程",
+    );
+    linkConcept(db, m2, specificId);
+    // 服务层本会自动修复;重新构造异常状态以单独验证 analytics 的只读兜底。
+    db.update(concepts).set({ categoryId: null }).where(eq(concepts.id, genericId)).run();
+
+    const matching = analytics(db, "u_local").weaknesses
+      .filter((w) => w.name === "解一元一次方程");
+    expect(matching).toHaveLength(1);
+    expect(matching[0].conceptId).toBe(categoryId);
+    expect(matching[0].mistakeCount).toBe(2);
+    expect(matching[0].pendingPracticeCount).toBe(2);
+    expect(matching[0].members.map((m) => m.conceptId).sort())
+      .toEqual([genericId, specificId].sort());
+  });
+
+  test("薄弱点返回全量并按待练习数降序;零证据概念被排除;习惯画像带学科", () => {
+    const db = freshDb();
+    // 12 个概念,验证超过 10 也全部返回;概念0额外关联一题,应排首位。
+    let firstConceptId = "";
     for (let i = 0; i < 12; i++) {
       const m = mkMistake(db, "math", `ans${i}`);
       const c = resolveOrCreateConcept(db, "u_local", "math", `概念${i}`, m);
+      if (i === 0) firstConceptId = c;
       linkConcept(db, m, c);
     }
+    const extra = mkMistake(db, "math", "extra");
+    linkConcept(db, extra, firstConceptId);
     // 孤立概念:无关联错题且无作答样本(如编新题建出的概念),不进薄弱点列表
     resolveOrCreateConcept(db, "u_local", "math", "孤立概念");
     db.insert(memoryFacts)
@@ -213,8 +264,9 @@ describe("学习分析统计(薄弱点三列 + 分学科统计)", () => {
     expect(activeConceptCount).toBe(13); // 12 + 孤立概念
     expect(a.weaknesses).toHaveLength(12); // 孤立概念被过滤
     expect(a.weaknesses.some((w) => w.name === "孤立概念")).toBe(false);
-    const scores = a.weaknesses.map((w) => w.score);
-    expect([...scores].sort((x, y) => x - y)).toEqual(scores); // 升序
+    expect(a.weaknesses[0]).toMatchObject({ conceptId: firstConceptId, pendingPracticeCount: 2 });
+    const pendingCounts = a.weaknesses.map((w) => w.pendingPracticeCount);
+    expect([...pendingCounts].sort((x, y) => y - x)).toEqual(pendingCounts);
 
     expect(a.habits).toHaveLength(1);
     expect(a.habits[0].scope).toBe("math");
