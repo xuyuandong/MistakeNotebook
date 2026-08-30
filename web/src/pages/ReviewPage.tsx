@@ -220,7 +220,7 @@ export function ReviewPage() {
   if (items === null) return <Loader />;
 
   return (
-    <Stack gap="md" maw={760}>
+    <Stack gap="md" maw="var(--app-content-w)">
       <PageHeader
         icon={IconCalendarCheck}
         title="今日复习"

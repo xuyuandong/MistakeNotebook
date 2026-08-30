@@ -147,7 +147,7 @@ export function MistakeDetailPage() {
       })();
 
   return (
-    <Stack gap="md" maw={800}>
+    <Stack gap="md" maw="var(--app-content-w)">
       <Group justify="space-between" wrap="nowrap">
         <Group gap="md">
           <Button variant="subtle" color="gray" leftSection={<IconArrowLeft size={16} />} onClick={() => navigate("/mistakes")} px={8}>

@@ -130,7 +130,7 @@ export function AnalyticsPage() {
   );
 
   return (
-    <div>
+    <div style={{ maxWidth: "var(--app-content-w)" }}>
       <PageHeader
         icon={IconChartPie}
         title="学习分析"
@@ -146,7 +146,7 @@ export function AnalyticsPage() {
         }
       />
 
-      <Stack gap="md" maw={920}>
+      <Stack gap="md">
         {/* 概览统计 */}
         <Group grow align="stretch">
           <StatCard

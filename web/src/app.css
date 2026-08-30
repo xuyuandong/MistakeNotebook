@@ -3,11 +3,38 @@
    只做样式,不承载业务逻辑;深浅色都通过 Mantine 的 color-scheme 变量适配。 */
 
 :root {
+  /* 统一内容列宽:所有页面的页头与中心内容块都收在这个宽度内,右缘对齐 */
+  --app-content-w: 860px;
   /* 极光三色(配 --app-grid 网格),RGB 供 alpha 组合 */
   --app-glow-indigo: 125, 135, 245;
   --app-glow-violet: 155, 110, 243;
   --app-glow-cyan: 76, 201, 240;
   --app-brand: 125, 135, 245;
+}
+
+/* ---------- 界面字号档位(设置页可调,存 localStorage) ----------
+   Mantine 文字尺寸全部走 --mantine-font-size-* 变量,按档位整体缩放;
+   small 档不覆盖,即默认字号(设置页的"小")。 */
+html[data-font-scale="middle"] {
+  --mantine-font-size-xs: 0.84rem;
+  --mantine-font-size-sm: 0.98rem;
+  --mantine-font-size-md: 1.12rem;
+  --mantine-font-size-lg: 1.26rem;
+  --mantine-font-size-xl: 1.4rem;
+}
+html[data-font-scale="large"] {
+  --mantine-font-size-xs: 0.94rem;
+  --mantine-font-size-sm: 1.09rem;
+  --mantine-font-size-md: 1.25rem;
+  --mantine-font-size-lg: 1.41rem;
+  --mantine-font-size-xl: 1.56rem;
+}
+html[data-font-scale="max"] {
+  --mantine-font-size-xs: 1.05rem;
+  --mantine-font-size-sm: 1.23rem;
+  --mantine-font-size-md: 1.4rem;
+  --mantine-font-size-lg: 1.58rem;
+  --mantine-font-size-xl: 1.75rem;
 }
 
 body {

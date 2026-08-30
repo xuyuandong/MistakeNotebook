@@ -235,7 +235,7 @@ export function CapturePage() {
   const savedCount = questions.filter((q) => q.saved).length;
 
   return (
-    <div>
+    <div style={{ maxWidth: "var(--app-content-w)" }}>
       <PageHeader
         icon={IconCloudUpload}
         title="导入录入"
@@ -267,7 +267,7 @@ export function CapturePage() {
       )}
 
       {mode === "import" && phase === "idle" && (
-        <Stack gap="md" maw={760}>
+        <Stack gap="md">
           <Card className="app-panel" withBorder>
             <Stack gap="sm">
               {[
@@ -337,7 +337,7 @@ export function CapturePage() {
       {mode === "import" && phase === "importing" && <Text c="dimmed">导入解析中…</Text>}
 
       {(phase === "ready" || (phase === "saving" && questions.length > 0)) && (
-        <Stack gap="md" maw={820}>
+        <Stack gap="md">
           <Alert color="brand" variant="light">
             共导入 {questions.length} 道题。字段已按豆包输出预填,请逐题核对(尤其是公式);
             全部选填,空白题按“完全不会”处理,可直接保存。
@@ -458,7 +458,7 @@ export function CapturePage() {
       )}
 
       {mode === "manual" && (
-        <Stack gap="md" maw={720}>
+        <Stack gap="md">
           <Card className="app-panel" withBorder>
             <Group gap="sm" wrap="nowrap" align="flex-start">
               <ThemeIcon variant="light" size={34} radius="md" color="brand">

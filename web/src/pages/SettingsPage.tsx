@@ -8,6 +8,7 @@ import {
   Modal,
   PasswordInput,
   Select,
+  Slider,
   Stack,
   Switch,
   Text,
@@ -22,10 +23,12 @@ import {
   IconDownload,
   IconTrash,
   IconDeviceFloppy,
+  IconTypography,
 } from "@tabler/icons-react";
 import { DEFAULT_REVIEW_INTERVALS, Subjects } from "@mistake-book/shared";
 import { api } from "../lib/api";
 import { PageHeader } from "../components/PageHeader";
+import { FONT_SCALES, loadFontScale, saveFontScale, type FontScale } from "../lib/fontScale";
 
 interface Me {
   userId: string;
@@ -53,6 +56,7 @@ export function SettingsPage() {
   const [grade, setGrade] = useState<string | null>(null);
   const [intervals, setIntervals] = useState<Record<string, string>>({});
   const [revival, setRevival] = useState(false);
+  const [fontScale, setFontScale] = useState<FontScale>(() => loadFontScale());
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [purgeOpen, setPurgeOpen] = useState(false);
@@ -160,7 +164,7 @@ export function SettingsPage() {
   );
 
   return (
-    <Stack gap="md" maw={680}>
+    <Stack gap="md" maw="var(--app-content-w)">
       <PageHeader
         icon={IconSettings}
         title="设置"
@@ -191,6 +195,31 @@ export function SettingsPage() {
           只影响出题难度、报告语境和历史证据权重;不会把其他年级的错题排除在复习和分析之外。
         </Text>
         <Select data={GRADES} value={grade} onChange={setGrade} placeholder="未设置" clearable w={160} />
+      </Card>
+
+      <Card className="app-panel" withBorder>
+        {sectionTitle(IconTypography, "cyan", "界面字号")}
+        <Text size="sm" c="dimmed" mb="sm">
+          为保护视力可整体放大界面文字,覆盖所有页面;拖动后立即生效,保存在本机浏览器,无需点「保存设置」。
+        </Text>
+        <Slider
+          min={0}
+          max={FONT_SCALES.length - 1}
+          step={1}
+          value={FONT_SCALES.findIndex((s) => s.value === fontScale)}
+          onChange={(v) => {
+            const scale = FONT_SCALES[v];
+            if (!scale) return;
+            setFontScale(scale.value);
+            saveFontScale(scale.value);
+          }}
+          marks={FONT_SCALES.map((s, i) => ({ value: i, label: s.label }))}
+          mb="xl"
+          w={380}
+        />
+        <Text size="md" fw={500}>
+          预览:一元一次方程与不等式 · The quick brown fox · 0123456789
+        </Text>
       </Card>
 
       <Card className="app-panel" withBorder>

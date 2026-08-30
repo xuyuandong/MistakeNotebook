@@ -297,7 +297,7 @@ export function PracticePage() {
 
   if (!setId) {
     return (
-      <Stack gap="md" maw={640}>
+      <Stack gap="md" maw="var(--app-content-w)">
         <PageHeader
           icon={IconTargetArrow}
           title="智能练习"
@@ -345,7 +345,7 @@ export function PracticePage() {
   }
 
   return (
-    <Stack gap="md" maw={760}>
+    <Stack gap="md" maw="var(--app-content-w)">
       <PageHeader
         icon={IconTargetArrow}
         title="智能练习"

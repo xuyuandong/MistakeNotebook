@@ -38,7 +38,7 @@ export function MistakesPage() {
   }, [load]);
 
   return (
-    <div>
+    <div style={{ maxWidth: "var(--app-content-w)" }}>
       <PageHeader
         icon={IconNotebook}
         title="错题库"
@@ -66,7 +66,7 @@ export function MistakesPage() {
       )}
 
       {items !== null && items.length > 0 && (
-        <Stack gap="sm" maw={860}>
+        <Stack gap="sm">
           {items.map((m) => {
             const color = SUBJECT_COLORS[m.subject] ?? "gray";
             return (
