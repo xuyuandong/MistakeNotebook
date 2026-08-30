@@ -1,29 +1,65 @@
-/* 全局视觉层:背景、卡片质感、导航、表格、滚动条。
+/* 全局视觉层:“极光玻璃”设计系统。
+   极光渐变背景 + 细网格纹理 + 玻璃拟态卡片 + 辉光与微动效;
    只做样式,不承载业务逻辑;深浅色都通过 Mantine 的 color-scheme 变量适配。 */
 
-/* ---------- 页面背景 ---------- */
-[data-mantine-color-scheme="light"] .app-main {
-  background:
-    radial-gradient(1200px 400px at 85% -10%, rgba(125, 135, 245, 0.07), transparent 60%),
-    #f5f6fa;
-}
-[data-mantine-color-scheme="dark"] .app-main {
-  background:
-    radial-gradient(1200px 400px at 85% -10%, rgba(125, 135, 245, 0.08), transparent 60%),
-    #0f1012;
+:root {
+  /* 极光三色(配 --app-grid 网格),RGB 供 alpha 组合 */
+  --app-glow-indigo: 125, 135, 245;
+  --app-glow-violet: 155, 110, 243;
+  --app-glow-cyan: 76, 201, 240;
+  --app-brand: 125, 135, 245;
 }
 
-/* ---------- 侧栏 ---------- */
+body {
+  font-feature-settings: "tnum" 0;
+}
+[data-mantine-color-scheme="light"] body {
+  background: #f4f6fb;
+}
+[data-mantine-color-scheme="dark"] body {
+  background: #0b0d16;
+}
+
+/* ---------- 页面背景:固定极光 + 网格 ---------- */
+[data-mantine-color-scheme="light"] .app-main {
+  background-color: #f4f6fb;
+  background-image:
+    radial-gradient(1000px 500px at 88% -12%, rgba(var(--app-glow-indigo), 0.12), transparent 62%),
+    radial-gradient(900px 480px at 4% -6%, rgba(var(--app-glow-violet), 0.09), transparent 60%),
+    radial-gradient(800px 460px at 52% 116%, rgba(var(--app-glow-cyan), 0.08), transparent 60%),
+    linear-gradient(rgba(101, 116, 247, 0.05) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(101, 116, 247, 0.05) 1px, transparent 1px);
+  background-size: auto, auto, auto, 44px 44px, 44px 44px;
+  background-attachment: fixed;
+}
+[data-mantine-color-scheme="dark"] .app-main {
+  background-color: #0b0d16;
+  background-image:
+    radial-gradient(1100px 560px at 90% -14%, rgba(var(--app-glow-indigo), 0.17), transparent 64%),
+    radial-gradient(920px 500px at 2% -8%, rgba(var(--app-glow-violet), 0.12), transparent 62%),
+    radial-gradient(840px 480px at 55% 116%, rgba(var(--app-glow-cyan), 0.1), transparent 62%),
+    linear-gradient(rgba(148, 163, 255, 0.05) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(148, 163, 255, 0.05) 1px, transparent 1px);
+  background-size: auto, auto, auto, 44px 44px, 44px 44px;
+  background-attachment: fixed;
+}
+
+/* ---------- 侧栏:玻璃面板 ---------- */
 .app-navbar {
   display: flex;
   flex-direction: column;
-  border-right: 1px solid var(--mantine-color-default-border);
 }
 [data-mantine-color-scheme="light"] .app-navbar {
-  background: rgba(255, 255, 255, 0.85);
+  background: rgba(255, 255, 255, 0.66);
+  backdrop-filter: blur(22px) saturate(1.5);
+  -webkit-backdrop-filter: blur(22px) saturate(1.5);
+  border-right: 1px solid rgba(228, 231, 244, 0.9);
 }
 [data-mantine-color-scheme="dark"] .app-navbar {
-  background: #141518;
+  background: rgba(13, 16, 28, 0.62);
+  backdrop-filter: blur(22px) saturate(1.4);
+  -webkit-backdrop-filter: blur(22px) saturate(1.4);
+  border-right: 1px solid rgba(255, 255, 255, 0.06);
 }
 
 .app-brand {
@@ -34,6 +70,7 @@
 }
 
 .app-brand-mark {
+  position: relative;
   width: 42px;
   height: 42px;
   border-radius: 13px;
@@ -41,9 +78,27 @@
   align-items: center;
   justify-content: center;
   color: #fff;
-  background: linear-gradient(135deg, #7d87f5 0%, #9b6ef3 100%);
-  box-shadow: 0 4px 12px rgba(125, 135, 245, 0.35);
+  background: linear-gradient(135deg, #7d87f5 0%, #9b6ef3 60%, #c26ef3 100%);
+  box-shadow:
+    0 6px 18px rgba(125, 135, 245, 0.45),
+    inset 0 1px 0 rgba(255, 255, 255, 0.35);
   flex-shrink: 0;
+}
+
+/* 品牌标题渐变字 */
+.app-brand-title {
+  background: linear-gradient(92deg, #5c63e8 0%, #9b6ef3 95%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
+}
+[data-mantine-color-scheme="dark"] .app-brand-title {
+  background: linear-gradient(92deg, #aeb4ff 0%, #cda3ff 95%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
 }
 
 .app-nav {
@@ -53,20 +108,54 @@
 }
 
 .app-nav .mantine-NavLink-root {
-  border-radius: 10px;
+  position: relative;
+  border-radius: 12px;
   margin-bottom: 2px;
   --nl-padding: 10px;
+  transition: background-color 0.16s ease, box-shadow 0.16s ease;
 }
 .app-nav .mantine-NavLink-root:hover {
-  background-color: var(--mantine-color-default-border-hover);
+  background-color: rgba(var(--app-brand), 0.08);
 }
 [data-mantine-color-scheme="light"] .app-nav .mantine-NavLink-root[data-active] {
-  background: linear-gradient(90deg, rgba(125, 135, 245, 0.14), rgba(155, 110, 243, 0.1));
+  background: linear-gradient(
+    92deg,
+    rgba(125, 135, 245, 0.16),
+    rgba(155, 110, 243, 0.1) 70%,
+    rgba(76, 201, 240, 0.08)
+  );
   color: var(--mantine-color-brand-7);
+  box-shadow:
+    inset 0 0 0 1px rgba(125, 135, 245, 0.22),
+    0 4px 14px -6px rgba(125, 135, 245, 0.4);
 }
 [data-mantine-color-scheme="dark"] .app-nav .mantine-NavLink-root[data-active] {
-  background: linear-gradient(90deg, rgba(125, 135, 245, 0.2), rgba(155, 110, 243, 0.12));
+  background: linear-gradient(
+    92deg,
+    rgba(125, 135, 245, 0.22),
+    rgba(155, 110, 243, 0.14) 70%,
+    rgba(76, 201, 240, 0.1)
+  );
   color: var(--mantine-color-brand-3);
+  box-shadow:
+    inset 0 0 0 1px rgba(125, 135, 245, 0.3),
+    0 4px 16px -6px rgba(125, 135, 245, 0.5);
+}
+.app-nav .mantine-NavLink-root[data-active] .mantine-NavLink-section {
+  color: inherit;
+}
+
+/* 激活项左侧光条 */
+.app-nav .mantine-NavLink-root[data-active]::before {
+  content: "";
+  position: absolute;
+  left: -12px;
+  top: 20%;
+  bottom: 20%;
+  width: 3px;
+  border-radius: 999px;
+  background: linear-gradient(180deg, #7d87f5, #9b6ef3);
+  box-shadow: 0 0 10px rgba(125, 135, 245, 0.8);
 }
 
 .app-navbar-footer {
@@ -74,57 +163,240 @@
   border-top: 1px solid var(--mantine-color-default-border);
 }
 
-/* ---------- 卡片质感 ---------- */
+/* ---------- 卡片:玻璃拟态 ---------- */
 [data-mantine-color-scheme="light"] .mantine-Card-root[data-with-border],
 [data-mantine-color-scheme="light"] .app-panel {
-  border: 1px solid rgba(230, 232, 240, 0.9);
+  background: rgba(255, 255, 255, 0.74);
+  backdrop-filter: blur(16px) saturate(1.45);
+  -webkit-backdrop-filter: blur(16px) saturate(1.45);
+  border: 1px solid rgba(255, 255, 255, 0.9);
   box-shadow:
-    0 1px 2px rgba(16, 24, 40, 0.04),
-    0 2px 8px rgba(16, 24, 40, 0.03);
+    inset 0 1px 0 rgba(255, 255, 255, 0.85),
+    0 1px 2px rgba(23, 28, 63, 0.04),
+    0 10px 28px -16px rgba(23, 28, 63, 0.14);
+}
+[data-mantine-color-scheme="dark"] .mantine-Card-root[data-with-border],
+[data-mantine-color-scheme="dark"] .app-panel {
+  background: rgba(19, 22, 38, 0.6);
+  backdrop-filter: blur(18px) saturate(1.3);
+  -webkit-backdrop-filter: blur(18px) saturate(1.3);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.05),
+    0 12px 32px -16px rgba(0, 0, 0, 0.6);
 }
 
 .app-card-hover {
-  transition: transform 0.15s ease, box-shadow 0.15s ease;
+  transition: transform 0.16s ease, box-shadow 0.16s ease, border-color 0.16s ease;
   cursor: pointer;
 }
 .app-card-hover:hover {
   transform: translateY(-2px);
+  border-color: rgba(125, 135, 245, 0.5) !important;
   box-shadow:
-    0 4px 6px rgba(16, 24, 40, 0.05),
-    0 10px 24px rgba(16, 24, 40, 0.08) !important;
+    inset 0 1px 0 rgba(255, 255, 255, 0.9),
+    0 4px 10px -4px rgba(23, 28, 63, 0.08),
+    0 18px 44px -16px rgba(109, 102, 245, 0.4) !important;
+}
+[data-mantine-color-scheme="dark"] .app-card-hover:hover {
+  border-color: rgba(125, 135, 245, 0.45) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.06),
+    0 18px 44px -14px rgba(0, 0, 0, 0.7),
+    0 0 0 1px rgba(125, 135, 245, 0.18) !important;
 }
 
 /* ---------- 页面头部 ---------- */
 .app-page-icon {
-  width: 44px;
-  height: 44px;
-  border-radius: 13px;
+  width: 46px;
+  height: 46px;
+  border-radius: 14px;
   display: flex;
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
 }
 [data-mantine-color-scheme="light"] .app-page-icon {
-  background: rgba(125, 135, 245, 0.12);
+  background: linear-gradient(135deg, rgba(125, 135, 245, 0.16), rgba(155, 110, 243, 0.12));
+  border: 1px solid rgba(125, 135, 245, 0.28);
+  box-shadow: 0 8px 20px -8px rgba(125, 135, 245, 0.55);
   color: var(--mantine-color-brand-7);
 }
 [data-mantine-color-scheme="dark"] .app-page-icon {
-  background: rgba(125, 135, 245, 0.16);
+  background: linear-gradient(135deg, rgba(125, 135, 245, 0.22), rgba(155, 110, 243, 0.16));
+  border: 1px solid rgba(125, 135, 245, 0.35);
+  box-shadow: 0 8px 22px -8px rgba(125, 135, 245, 0.6);
   color: var(--mantine-color-brand-3);
 }
 
+.app-page-title {
+  letter-spacing: -0.01em;
+}
+
 /* ---------- 统计卡片 ---------- */
+.app-stat {
+  position: relative;
+  overflow: hidden;
+  transition: transform 0.16s ease, box-shadow 0.16s ease, border-color 0.16s ease;
+}
+.app-stat:hover {
+  transform: translateY(-2px);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.9),
+    0 16px 40px -18px rgba(23, 28, 63, 0.28) !important;
+}
+[data-mantine-color-scheme="dark"] .app-stat:hover {
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.06),
+    0 16px 40px -18px rgba(0, 0, 0, 0.7) !important;
+}
+/* 顶部流光细线,颜色由 --stat-accent 提供 */
+.app-stat::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 14%;
+  right: 14%;
+  height: 2px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, transparent, var(--stat-accent, rgba(125, 135, 245, 0.85)), transparent);
+  opacity: 0.9;
+}
+
+.app-stat-label {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--mantine-color-dimmed);
+}
+
+/* 学科/状态色小芯片 */
+.app-icon-chip {
+  width: 34px;
+  height: 34px;
+  border-radius: 11px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  background: color-mix(in srgb, var(--chip-color, var(--mantine-color-brand-6)) 13%, transparent);
+  color: var(--chip-color, var(--mantine-color-brand-6));
+  border: 1px solid color-mix(in srgb, var(--chip-color, var(--mantine-color-brand-6)) 24%, transparent);
+}
+[data-mantine-color-scheme="dark"] .app-icon-chip {
+  background: color-mix(in srgb, var(--chip-color, var(--mantine-color-brand-4)) 16%, transparent);
+  color: var(--chip-color, var(--mantine-color-brand-3));
+}
+
 .app-stat-value {
   font-size: 30px;
-  font-weight: 700;
+  font-weight: 800;
   line-height: 1.1;
   font-variant-numeric: tabular-nums;
   letter-spacing: -0.02em;
+  color: var(--stat-value-color, var(--mantine-color-text));
+}
+[data-mantine-color-scheme="dark"] .app-stat-value {
+  /* 深色下把 -7 档的深色调亮,保证可读 */
+  color: color-mix(in srgb, var(--stat-value-color, #eef0ff) 55%, #e7eaff);
+}
+
+/* ---------- 按钮 ---------- */
+.mantine-Button-root[data-variant="filled"] {
+  --button-bg: linear-gradient(135deg, #7580f6 0%, #9b6ef3 100%);
+  --button-hover: #8590f8;
+  --button-color: #fff;
+  border: none;
+  box-shadow:
+    0 4px 16px -4px rgba(109, 102, 245, 0.55),
+    inset 0 1px 0 rgba(255, 255, 255, 0.22);
+  transition: box-shadow 0.16s ease, filter 0.16s ease, transform 0.08s ease;
+}
+.mantine-Button-root[data-variant="filled"]:hover:not([data-disabled]) {
+  filter: brightness(1.07);
+  box-shadow:
+    0 6px 22px -4px rgba(109, 102, 245, 0.65),
+    inset 0 1px 0 rgba(255, 255, 255, 0.25);
+}
+.mantine-Button-root[data-variant="filled"]:active:not([data-disabled]) {
+  transform: translateY(1px);
+}
+
+/* ---------- 输入与弹层 ---------- */
+[data-mantine-color-scheme="light"] .mantine-Input-input {
+  --input-bg: rgba(255, 255, 255, 0.72);
+  --input-bd: rgba(224, 228, 242, 0.95);
+}
+[data-mantine-color-scheme="dark"] .mantine-Input-input {
+  --input-bg: rgba(255, 255, 255, 0.045);
+  --input-bd: rgba(255, 255, 255, 0.1);
+}
+.mantine-Input-input:focus {
+  box-shadow: 0 0 0 3.5px rgba(125, 135, 245, 0.16);
+}
+[data-error] .mantine-Input-input:focus {
+  box-shadow: 0 0 0 3.5px rgba(250, 82, 82, 0.14);
+}
+
+[data-mantine-color-scheme="light"] .mantine-Combobox-dropdown {
+  background: rgba(255, 255, 255, 0.88);
+  backdrop-filter: blur(18px) saturate(1.4);
+  -webkit-backdrop-filter: blur(18px) saturate(1.4);
+  border: 1px solid rgba(228, 231, 244, 0.95);
+  box-shadow: 0 14px 40px -14px rgba(23, 28, 63, 0.25);
+}
+[data-mantine-color-scheme="dark"] .mantine-Combobox-dropdown {
+  background: rgba(19, 22, 38, 0.9);
+  backdrop-filter: blur(18px) saturate(1.3);
+  -webkit-backdrop-filter: blur(18px) saturate(1.3);
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  box-shadow: 0 14px 44px -14px rgba(0, 0, 0, 0.7);
+}
+
+/* 分段控件:玻璃底座 + 选中项品牌渐变胶囊(选中文字走 --sc-label-color 变白) */
+.mantine-SegmentedControl-root {
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  --sc-label-color: #fff;
+}
+[data-mantine-color-scheme="light"] .mantine-SegmentedControl-root {
+  background: rgba(255, 255, 255, 0.6);
+  box-shadow: inset 0 0 0 1px rgba(228, 231, 244, 0.9), 0 2px 8px -2px rgba(23, 28, 63, 0.08);
+}
+[data-mantine-color-scheme="dark"] .mantine-SegmentedControl-root {
+  background: rgba(255, 255, 255, 0.05);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08);
+}
+/* 同时覆盖浮动指示器与原生 radio ::before 两种渲染路径 */
+.mantine-SegmentedControl-indicator,
+.mantine-SegmentedControl-label[data-active]::before {
+  background: linear-gradient(135deg, #7580f6 0%, #9b6ef3 100%);
+  box-shadow: 0 3px 10px -2px rgba(109, 102, 245, 0.55), inset 0 1px 0 rgba(255, 255, 255, 0.28);
+}
+
+[data-mantine-color-scheme="light"] .mantine-Modal-content {
+  background: rgba(255, 255, 255, 0.88);
+  backdrop-filter: blur(24px) saturate(1.4);
+  -webkit-backdrop-filter: blur(24px) saturate(1.4);
+  border: 1px solid rgba(255, 255, 255, 0.9);
+  box-shadow: 0 24px 64px -20px rgba(23, 28, 63, 0.35);
+}
+[data-mantine-color-scheme="dark"] .mantine-Modal-content {
+  background: rgba(19, 22, 38, 0.92);
+  backdrop-filter: blur(24px) saturate(1.3);
+  -webkit-backdrop-filter: blur(24px) saturate(1.3);
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  box-shadow: 0 24px 64px -20px rgba(0, 0, 0, 0.8);
+}
+.mantine-Modal-overlay {
+  backdrop-filter: blur(5px);
+  -webkit-backdrop-filter: blur(5px);
 }
 
 /* ---------- 表格 ---------- */
 [data-mantine-color-scheme="light"] .mantine-Table-thead {
-  background: var(--mantine-color-gray-0);
+  background: rgba(244, 246, 251, 0.8);
 }
 [data-mantine-color-scheme="dark"] .mantine-Table-thead {
   background: rgba(255, 255, 255, 0.04);
@@ -132,7 +404,7 @@
 .mantine-Table-th {
   font-size: var(--mantine-font-size-xs);
   text-transform: none;
-  letter-spacing: 0.02em;
+  letter-spacing: 0.04em;
   color: var(--mantine-color-dimmed);
   font-weight: 600;
 }
@@ -145,28 +417,33 @@
   flex: 1;
 }
 [data-mantine-color-scheme="light"] .app-bar-track {
-  background: var(--mantine-color-gray-2);
+  background: rgba(101, 116, 247, 0.09);
+  box-shadow: inset 0 1px 2px rgba(23, 28, 63, 0.06);
 }
 [data-mantine-color-scheme="dark"] .app-bar-track {
-  background: rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.07);
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.4);
 }
 .app-bar-fill {
   height: 100%;
   border-radius: 999px;
-  transition: width 0.4s ease;
+  background-image: linear-gradient(90deg, color-mix(in srgb, var(--bar-color, #7d87f5) 72%, #fff), var(--bar-color, #7d87f5));
+  background-color: var(--bar-color, #7d87f5);
+  transition: width 0.45s cubic-bezier(0.22, 0.61, 0.36, 1);
 }
 
 /* ---------- 答案/解析面板 ---------- */
 .app-answer-panel {
-  border-radius: 10px;
+  border-radius: 12px;
   padding: 12px 16px;
 }
 [data-mantine-color-scheme="light"] .app-answer-panel {
-  background: rgba(12, 166, 109, 0.07);
-  border: 1px solid rgba(12, 166, 109, 0.2);
+  background: rgba(12, 166, 109, 0.08);
+  border: 1px solid rgba(12, 166, 109, 0.22);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.5);
 }
 [data-mantine-color-scheme="dark"] .app-answer-panel {
-  background: rgba(12, 166, 109, 0.09);
+  background: rgba(12, 166, 109, 0.1);
   border: 1px solid rgba(12, 166, 109, 0.28);
 }
 
@@ -175,11 +452,33 @@
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
   padding: 56px 24px;
   text-align: center;
-  border: 1.5px dashed var(--mantine-color-default-border);
-  border-radius: var(--mantine-radius-md);
+  border: 1.5px dashed color-mix(in srgb, var(--app-brand) 38%, var(--mantine-color-default-border));
+  border-radius: var(--mantine-radius-lg);
+}
+[data-mantine-color-scheme="light"] .app-empty {
+  background: rgba(255, 255, 255, 0.42);
+}
+[data-mantine-color-scheme="dark"] .app-empty {
+  background: rgba(255, 255, 255, 0.02);
+}
+.app-empty-icon {
+  width: 64px;
+  height: 64px;
+  border-radius: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, rgba(125, 135, 245, 0.15), rgba(155, 110, 243, 0.12));
+  border: 1px solid rgba(125, 135, 245, 0.3);
+  box-shadow: 0 10px 26px -10px rgba(125, 135, 245, 0.6);
+  color: var(--mantine-color-brand-6);
+  margin-bottom: 4px;
+}
+[data-mantine-color-scheme="dark"] .app-empty-icon {
+  color: var(--mantine-color-brand-3);
 }
 
 /* ---------- 导入步骤 ---------- */
@@ -193,14 +492,37 @@
   font-size: 13px;
   font-weight: 700;
   flex-shrink: 0;
-  background: rgba(125, 135, 245, 0.14);
-  color: var(--mantine-color-brand-7);
-}
-[data-mantine-color-scheme="dark"] .app-step {
-  color: var(--mantine-color-brand-3);
+  color: #fff;
+  background: linear-gradient(135deg, #7580f6, #9b6ef3);
+  box-shadow: 0 4px 10px -2px rgba(125, 135, 245, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.3);
 }
 
-/* ---------- 滚动条 ---------- */
+/* ---------- 入场动效 ---------- */
+@keyframes app-rise {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.app-main > * {
+  animation: app-rise 0.38s cubic-bezier(0.22, 0.61, 0.36, 1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .app-main > * {
+    animation: none;
+  }
+  .app-card-hover,
+  .app-stat {
+    transition: none;
+  }
+}
+
+/* ---------- 滚动条与文本选择 ---------- */
 * {
   scrollbar-width: thin;
   scrollbar-color: var(--mantine-color-default-border) transparent;
@@ -215,6 +537,9 @@
 }
 *::-webkit-scrollbar-track {
   background: transparent;
+}
+::selection {
+  background: rgba(125, 135, 245, 0.28);
 }
 
 /* KaTeX 公式与正文基线对齐、允许换行 */

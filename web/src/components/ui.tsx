@@ -43,7 +43,7 @@ export function StatusBadge({ status }: { status: string }) {
   return <Badge color={info.color}>{info.label}</Badge>;
 }
 
-/** 统计卡片:大数字 + 标签 + 图标 */
+/** 统计卡片:顶部流光线 + 色彩芯片图标 + 大数字(视觉细节在 app.css 的 .app-stat 系列) */
 export function StatCard({
   label,
   value,
@@ -57,17 +57,22 @@ export function StatCard({
   icon?: IconComponent;
   color?: string;
 }) {
+  const cssVars = {
+    "--stat-accent": `var(--mantine-color-${color}-6)`,
+    "--stat-value-color": `var(--mantine-color-${color}-7)`,
+    "--chip-color": `var(--mantine-color-${color}-6)`,
+  } as CSSProperties;
   return (
-    <Card className="app-panel" padding="md" withBorder>
-      <Group justify="space-between" wrap="nowrap" mb={6}>
-        <Text size="sm" c="dimmed" fw={500}>
-          {label}
-        </Text>
-        {Icon && <Icon size={18} stroke={1.8} style={{ color: `var(--mantine-color-${color}-6)` }} />}
+    <Card className="app-panel app-stat" padding="md" withBorder style={cssVars}>
+      <Group justify="space-between" wrap="nowrap" mb={8} align="flex-start">
+        <span className="app-stat-label">{label}</span>
+        {Icon && (
+          <span className="app-icon-chip">
+            <Icon size={18} stroke={1.8} />
+          </span>
+        )}
       </Group>
-      <div className="app-stat-value" style={{ color: `var(--mantine-color-${color}-7)` }}>
-        {value}
-      </div>
+      <div className="app-stat-value">{value}</div>
       {hint && (
         <Text size="xs" c="dimmed" mt={4}>
           {hint}
@@ -77,7 +82,7 @@ export function StatCard({
   );
 }
 
-/** 空状态:虚线框 + 图标 + 提示 */
+/** 空状态:渐变图标环 + 虚线框 + 提示 */
 export function EmptyState({
   icon: Icon,
   title,
@@ -91,7 +96,11 @@ export function EmptyState({
 }) {
   return (
     <div className="app-empty">
-      {Icon && <Icon size={36} stroke={1.5} style={{ color: "var(--mantine-color-dimmed)" }} />}
+      {Icon && (
+        <div className="app-empty-icon">
+          <Icon size={30} stroke={1.6} />
+        </div>
+      )}
       <Text fw={600}>{title}</Text>
       {hint && (
         <Text size="sm" c="dimmed" maw={420}>
@@ -127,7 +136,7 @@ export function CountBar({
       <div className="app-bar-track">
         <div
           className="app-bar-fill"
-          style={{ width: `${pct}%`, background: `var(--mantine-color-${color}-6)` }}
+          style={{ width: `${pct}%`, "--bar-color": `var(--mantine-color-${color}-6)` } as CSSProperties}
         />
       </div>
     </div>

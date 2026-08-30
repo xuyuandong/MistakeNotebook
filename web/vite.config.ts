@@ -15,6 +15,7 @@ export default defineConfig({
         description: "录入错题 → AI 分析 → 复习 → 针对性练习",
         lang: "zh-CN",
         theme_color: "#757ef4",
+        background_color: "#0b0d16",
         icons: [
           { src: "/favicon.svg", sizes: "any", type: "image/svg+xml" },
         ],

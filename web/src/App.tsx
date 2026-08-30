@@ -45,7 +45,7 @@ function Brand() {
         <IconBook2 size={22} stroke={1.8} />
       </div>
       <Box>
-        <Text fw={800} fz={17} lh={1.2}>
+        <Text fw={800} fz={17} lh={1.2} className="app-brand-title">
           错题本
         </Text>
         <Text size="xs" c="dimmed">

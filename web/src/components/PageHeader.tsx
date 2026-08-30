@@ -2,7 +2,7 @@ import type { ReactNode } from "react";
 import { Group, Stack, Text, Title } from "@mantine/core";
 import type { IconComponent } from "./ui";
 
-/** 统一页头:左侧图标 + 标题 + 描述,右侧操作区 */
+/** 统一页头:左侧渐变图标块 + 标题 + 描述,右侧操作区(样式见 app.css .app-page-*) */
 export function PageHeader({
   icon: Icon,
   title,
@@ -23,7 +23,7 @@ export function PageHeader({
           </div>
         )}
         <Stack gap={2}>
-          <Title order={3} mb={0}>
+          <Title order={3} mb={0} className="app-page-title">
             {title}
           </Title>
           {description && (

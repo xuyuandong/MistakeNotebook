@@ -1,4 +1,12 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
-  <rect width="64" height="64" rx="12" fill="#228be6"/>
-  <text x="32" y="42" font-size="30" text-anchor="middle" fill="#fff" font-family="sans-serif">错</text>
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#7d87f5"/>
+      <stop offset="0.6" stop-color="#9b6ef3"/>
+      <stop offset="1" stop-color="#c26ef3"/>
+    </linearGradient>
+  </defs>
+  <rect width="64" height="64" rx="15" fill="url(#g)"/>
+  <rect x="1" y="1" width="62" height="30" rx="14" fill="#fff" opacity="0.12"/>
+  <text x="32" y="43" font-size="30" font-weight="700" text-anchor="middle" fill="#fff" font-family="-apple-system,'PingFang SC','Microsoft YaHei',sans-serif">错</text>
 </svg>
