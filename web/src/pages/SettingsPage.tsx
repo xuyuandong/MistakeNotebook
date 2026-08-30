@@ -21,6 +21,7 @@ import {
   IconShieldLock,
   IconDownload,
   IconTrash,
+  IconDeviceFloppy,
 } from "@tabler/icons-react";
 import { DEFAULT_REVIEW_INTERVALS, Subjects } from "@mistake-book/shared";
 import { api } from "../lib/api";
@@ -160,7 +161,29 @@ export function SettingsPage() {
 
   return (
     <Stack gap="md" maw={680}>
-      <PageHeader icon={IconSettings} title="设置" description="年级、复习间隔与数据管理" />
+      <PageHeader
+        icon={IconSettings}
+        title="设置"
+        description="年级、复习间隔与数据管理"
+        actions={
+          <Group gap="sm" wrap="nowrap">
+            {saved && (
+              <Text c="teal" size="sm" fw={600}>
+                ✓ 已保存
+              </Text>
+            )}
+            <Button leftSection={<IconDeviceFloppy size={16} />} onClick={() => void saveSettings()}>
+              保存设置
+            </Button>
+          </Group>
+        }
+      />
+
+      {error && (
+        <Alert color="red" mb="md" onClose={() => setError(null)} withCloseButton>
+          {error}
+        </Alert>
+      )}
 
       <Card className="app-panel" withBorder>
         {sectionTitle(IconSchool, "brand", "当前年级")}
@@ -174,7 +197,7 @@ export function SettingsPage() {
         {sectionTitle(IconCalendarStats, "teal", "复习间隔(天,按学科)")}
         <Text size="sm" c="dimmed" mb="sm">
           答对后隔几天再复习,逐档递进;答错不倒退,留在原档。数学重思考轻记忆,默认更疏(1→10→30);
-          语文/英语字词记忆用较密阶梯。改完点下方「保存设置」,对之后完成的复习生效。
+          语文/英语字词记忆用较密阶梯。改完点右上角「保存设置」,对之后完成的复习生效。
         </Text>
         <Stack gap="xs">
           {Subjects.map((s) => (
@@ -195,14 +218,6 @@ export function SettingsPage() {
           checked={revival}
           onChange={(e) => setRevival(e.currentTarget.checked)}
         />
-        <Group mt="md">
-          <Button onClick={() => void saveSettings()}>保存设置</Button>
-          {saved && (
-            <Text c="teal" size="sm" fw={600}>
-              ✓ 已保存
-            </Text>
-          )}
-        </Group>
       </Card>
 
       <Card className="app-panel" withBorder>
@@ -273,8 +288,6 @@ export function SettingsPage() {
           </Group>
         </Stack>
       </Modal>
-
-      {error && <Alert color="red">{error}</Alert>}
     </Stack>
   );
 }
