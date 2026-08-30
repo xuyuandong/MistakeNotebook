@@ -4,7 +4,10 @@ import type { z } from "zod";
 import {
   ingestionDrafts,
   learningEvents,
+  conceptCategories,
+  concepts,
   mistakeVersions,
+  mistakeConcepts,
   mistakes,
   reviewSchedules,
   users,
@@ -304,6 +307,20 @@ export function getMistake(
   status: string;
   content: MistakeContent;
   version: number;
+  errorType: string | null;
+  errorEvidence: string | null;
+  improvementsJson: string | null;
+  analysisConfidence: number | null;
+  needsFollowUp: number;
+  followUpQuestion: string | null;
+  concepts: {
+    id: string;
+    name: string;
+    category: string | null;
+    isPrimary: boolean;
+    evidence: string | null;
+    confidence: number | null;
+  }[];
   createdAt: string;
 } {
   const row = db.get<{
@@ -311,8 +328,15 @@ export function getMistake(
     subject: string;
     status: string;
     current_version_id: string | null;
+    error_type: string | null;
+    error_evidence: string | null;
+    improvements_json: string | null;
+    analysis_confidence: number | null;
+    needs_follow_up: number;
+    follow_up_question: string | null;
     created_at: string;
-  }>(sql`SELECT id, subject, status, current_version_id, created_at
+  }>(sql`SELECT id, subject, status, current_version_id, error_type, error_evidence,
+                 improvements_json, analysis_confidence, needs_follow_up, follow_up_question, created_at
           FROM mistakes WHERE id = ${id} AND user_id = ${userId}`);
   if (!row) throw new ServiceError("NOT_FOUND", "错题不存在");
   const ver = row.current_version_id
@@ -320,12 +344,48 @@ export function getMistake(
         sql`SELECT version, content_json FROM mistake_versions WHERE id = ${row.current_version_id}`,
       )
     : undefined;
+  const linked = ver
+    ? db
+        .select({
+          id: concepts.id,
+          name: concepts.canonicalName,
+          category: conceptCategories.canonicalName,
+          isPrimary: mistakeConcepts.isPrimary,
+          evidence: mistakeConcepts.evidence,
+          confidence: mistakeConcepts.confidence,
+        })
+        .from(mistakeConcepts)
+        .innerJoin(concepts, eq(concepts.id, mistakeConcepts.conceptId))
+        .leftJoin(conceptCategories, eq(conceptCategories.id, concepts.categoryId))
+        .where(
+          and(
+            eq(mistakeConcepts.mistakeId, id),
+            eq(mistakeConcepts.mistakeVersion, ver.version),
+            eq(concepts.userId, userId),
+          ),
+        )
+        .all()
+    : [];
   return {
     id: row.id,
     subject: row.subject,
     status: row.status,
     version: ver?.version ?? 0,
     content: ver ? JSON.parse(ver.content_json) : null,
+    errorType: row.error_type,
+    errorEvidence: row.error_evidence,
+    improvementsJson: row.improvements_json,
+    analysisConfidence: row.analysis_confidence,
+    needsFollowUp: row.needs_follow_up,
+    followUpQuestion: row.follow_up_question,
+    concepts: linked.map((c) => ({
+      id: c.id,
+      name: c.name,
+      category: c.category,
+      isPrimary: c.isPrimary === 1,
+      evidence: c.evidence,
+      confidence: c.confidence,
+    })),
     createdAt: row.created_at,
   };
 }

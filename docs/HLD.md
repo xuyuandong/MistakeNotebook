@@ -250,10 +250,11 @@ CC Switch 只用于开发者在 Codex/Claude Code 等编程工具中切换模型
 | `subject` | subject | 数学→math、英语→english、语文→chinese；无法映射 → 整批报错定位 |
 | `chapter` | source | 可空 |
 | `error_raw_note` | note | 可空；学生对错误的原始描述，仅作分析参考 |
+| `suggested_concepts` | doubaoHints | 可选数组,≤5 项、每项 ≤50 字；仅作为后续文本分析参考,导入时不建概念 |
 
 - 顶层必须是 JSON 数组；不是数组时整批拒绝并提示；
 - `question` 必填非空；其余字段可空，禁止臆造；
-- 单批 ≤ 50 题、文本 ≤ 512 KB；模板 `doubao-template@6` 全文见 LLD 附录 A。
+- 单批 ≤ 50 题、文本 ≤ 512 KB；模板 `doubao-template@7` 全文见 LLD 附录 A。
 
 ### 7.3 导入校验（确定性，零模型调用）
 
@@ -452,17 +453,19 @@ MVP 不必立即使用向量数据库。先按以下顺序检索：
 
 不加载教材目录，也不预先创建完整知识点树。知识概念由错题逐步产生：
 
-1. 模型为新错题输出候选概念名称、证据和与既有概念的相似候选 ID；
-2. 服务端先匹配规范名称和别名，再用 FTS5 查找近似概念；
-3. 高置信匹配关联到已有概念，否则创建新的待确认概念；
-4. 用户可以改名、合并或拆分；旧 ID 通过 `merged_into_id` 保持可追溯；
-5. 掌握度只计算有真实错题或作答证据的概念。
+1. 豆包的 `suggested_concepts` 只作为参考；程序内分析模型输出 `category + name + evidence + confidence`，不接收可执行指令；
+2. 分析调用输入该生该学科最多 80 个 active 分类，模型必须优先复用已有中粒度分类，确无合适项才创建；服务端精确解析分类，已有概念的 `category_id` 不被模型覆盖；
+3. 具体概念先匹配规范名称和别名，命中则复用，否则创建待确认概念；错题关联保存概念 ID，改名/改挂自动反映；
+4. 分类合并会把成员整体改挂目标分类，旧分类保留 `merged_into_id`；概念合并迁移错题关联并从事实源重算掌握度，旧概念同样保留合并历史；
+5. 手动整理命令调用 `consolidate@1` 生成归类/归并建议，所有 ID 做用户与学科校验，终端逐条 `y/N` 确认后才应用；
+6. 掌握度只计算有真实错题或作答证据的叶子概念；Dashboard 按分类聚合，错题取成员并集、样本求和、掌握分按样本加权，成员可展开。
 
 新增表：
 
 | 表 | 关键字段 |
 |---|---|
-| `concepts` | `id`, `user_id`, `subject`, `canonical_name`, `parent_id?`, `status`, `discovered_from_mistake_id`, `merged_into_id?` |
+| `concept_categories` | `id`, `user_id`, `subject`, `canonical_name`, `status`, `merged_into_id?` |
+| `concepts` | `id`, `user_id`, `subject`, `canonical_name`, `category_id?`, `status`, `discovered_from_mistake_id`, `merged_into_id?` |
 | `concept_aliases` | `concept_id`, `alias`, `source`, `confidence` |
 | `mistake_concepts` | `mistake_id`, `concept_id`, `is_primary`, `evidence`, `confidence`, `confirmed_at?` |
 
@@ -518,7 +521,7 @@ erDiagram
 | `POST` | `/api/v1/practice-sets` | 创建智能练习（学科 + 旧题/新题开关） |
 | `GET` | `/api/v1/practice-sets/{id}` | 获取选题分析、生成进度与题目 |
 | `POST` | `/api/v1/questions/{id}/reports` | 举报问题题 |
-| `GET` | `/api/v1/analytics/weaknesses` | 薄弱点摘要 |
+| `GET` | `/api/v1/analytics/weaknesses` | 学习分析:全部活跃分类聚合薄弱点(含可展开成员、错题去重并集/毕业数/样本加权掌握分,前端按学科与 Top N 切片)、分学科统计、错误类型与习惯画像 |
 | `GET` | `/api/v1/learner-profile` | 获取结构化学习状态与长期摘要 |
 | `POST` | `/api/v1/learner-profile/refresh` | 创建批量学生分析与总结任务 |
 | `GET` | `/api/v1/reviews/today` | 今日复习 |

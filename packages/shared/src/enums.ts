@@ -42,7 +42,7 @@ export const Providers = ["deepseek", "glm", "kimi", "mock"] as const;
 export const Provider = z.enum(Providers);
 export type Provider = z.infer<typeof Provider>;
 
-/** text_model 上的任务(识题在豆包侧,系统内无 extract) */
+/** text_model 上的任务(识题在豆包侧,系统内无 extract);consolidate_concepts = 一次性概念整理工具 */
 export const TaskTypes = [
   "analyze_mistake",
   "generate_questions",
@@ -50,6 +50,7 @@ export const TaskTypes = [
   "summarize_learner",
   "judge_answer",
   "select_topics",
+  "consolidate_concepts",
 ] as const;
 export const TaskType = z.enum(TaskTypes);
 export type TaskType = z.infer<typeof TaskType>;

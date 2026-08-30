@@ -18,12 +18,12 @@
 | 运行形态 | **单机家庭使用,免登录**(用户 2026-08-29 决策):不做注册/多用户/角色,接口不做鉴权 | `users` 表保留单条种子记录 `u_local`,所有数据归属该用户,`user_id` 列保留便于未来恢复鉴权;移除 auth 层;`APP_AUTH_TOKEN` 保留但仅作危险区(一键清空)解锁口令,不再是登录凭证。公网部署前必须恢复鉴权与用户隔离 |
 | 识题方案 | **豆包人工中转**(用户 2026-08-29 决策):人工把作业照片交给豆包,豆包按版本化模板输出 JSON;系统只导入该 JSON | 移除 vision_model 槽位、图片/PDF 上传、PDF.js 与 extract 任务;若人工中转成为主要使用摩擦,再评估直调视觉模型 API |
 | text_model | DeepSeek(先配置占位);普通文本模型即可,**无需多模态** | 仅改 `config/models.yaml`,代码零改动 |
-| 导入契约 | **JSON 数组**(用户 2026-08-29 决策,`doubao-import@2`),每元素 `{question, type, standard_answer, standard_solution, student_answer, subject, chapter, error_raw_note}`;字段映射见 §4.2 | 单批 ≤50 题、≤512KB;`student_answer==""` → 空白题规则;顶层非数组整批拒绝 |
-| 豆包模板版本 | `doubao-template@6`,全文唯一真源为仓库根 `llm_prompts/doubao_extract.md`(附录 A 仅保留维护规则);模板语义变更递增版本号并回归 `evals/import/` 黄金集 | 模板与导入契约联动;豆包 UI 变化不影响契约;同步到豆包 Skill 时只复制该文件正文 |
+| 导入契约 | **JSON 数组**(用户 2026-08-29 决策,`doubao-import@2`),每元素 `{question, type, standard_answer, standard_solution, student_answer, subject, chapter, error_raw_note, suggested_concepts?}`;字段映射见 §4.2 | 单批 ≤50 题、≤512KB;`suggested_concepts` ≤5 项且仅作分析参考;旧 JSON 不带字段兼容 |
+| 豆包模板版本 | `doubao-template@7`,全文唯一真源为仓库根 `llm_prompts/doubao_extract.md`(附录 A 仅保留维护规则);模板语义变更递增版本号并回归 `evals/import/` 黄金集 | 模板与导入契约联动;豆包 UI 变化不影响契约;同步到豆包 Skill 时只复制该文件正文 |
 | 作业原图 | 不进入本系统;原图留在豆包会话/用户相册,系统只存 JSON 导入原文(`import_batches.raw_json`) | 移除 `attachments`/`attachment_links` 表与 `/uploads`;确有原图对照需求时再加可选附件 |
 | 智能出题 | 学科必选 + 来源开关 `mode: past(出旧题,默认)\|new(编新题)`;先由 LLM 选题分析(输入画像/分布/复习情况)输出目标知识点与理由,存 `practice_sets.selection_json` | past 模式确定性检索历史错题,LLM 不生成内容;new 模式走生成校验流水线 |
 | 主观题判分 | 新增 `judge_answer` 任务(judge@1):输入题目/标准答案/评分要点/学生答案 → correct\|partial\|wrong + 依据 + 简评;客观题本地比对不走模型;学生可申诉改判 | 判分幂等键 `judge:{attemptId}`;判分准确率不可接受时退回仅客观题 |
-| AI 主动归因 | analyze@4:学生错误备注选填,AI 必须结合历史错题规律与学生画像主动替学生归因(技术性错误类型 + 学习方法/习惯),输出三层建议(技术性/方法性/认知性);画像推断须标注置信度 | 画像级结论写 `memory_facts(kind='habit_pattern')`;学生可纠正,纠正值优先进入上下文 |
+| AI 主动归因 | analyze@6:分学科分析,学生错误备注选填,输出技术性错误类型、学习方法/习惯、三层建议与 `category + concept`;输入已有分类并优先复用 | 画像级结论写 `memory_facts(kind='habit_pattern')`;分类动态生长但已有归属不被模型覆盖 |
 | 部署环境 | 个人 Mac / 内网,无 HTTPS/域名要求;**不暴露公网** | PWA 安装在内网需 HTTPS 才可用,内网明文访问按普通网页使用;备份方案见 §11 |
 | 包管理 | pnpm workspace(Node ≥ 20) | — |
 | 录入核对表单 | 豆包 JSON 预填全部字段(学科/题干/卷面答案/手写作答),全部选填,识别不到不填 | 用户 2026-08-28 决策:不强制人工录入;保留可编辑核对页用于纠正豆包识别错误(PRD 5.1.2) |
@@ -162,7 +162,7 @@ CREATE TABLE import_batches (
   id              TEXT PRIMARY KEY,
   user_id         TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   source          TEXT,                        -- 来自 JSON.source 或用户标注:试卷名/日期
-  template_version TEXT NOT NULL,              -- 如 doubao-template@6
+  template_version TEXT NOT NULL,              -- 如 doubao-template@7
   raw_json        TEXT NOT NULL,               -- 导入原文全文存档(≤512KB),追溯基准
   sha256          TEXT NOT NULL,               -- 重复导入提醒
   question_count  INTEGER NOT NULL,
@@ -185,13 +185,27 @@ CREATE TABLE ingestion_drafts (
 );
 CREATE INDEX idx_drafts_batch ON ingestion_drafts(import_batch_id, status);
 
--- 知识概念(数据驱动发现,不预置知识树)
+-- 概念分类(中粒度元信息层,不预置完整词表;可合并并保留历史)
+CREATE TABLE concept_categories (
+  id             TEXT PRIMARY KEY,
+  user_id        TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  subject        TEXT NOT NULL CHECK (subject IN ('chinese','math','english')),
+  canonical_name TEXT NOT NULL,
+  status         TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','merged')),
+  merged_into_id TEXT REFERENCES concept_categories(id) ON DELETE SET NULL,
+  created_at     TEXT NOT NULL,
+  updated_at     TEXT NOT NULL,
+  UNIQUE (user_id, subject, canonical_name)
+);
+
+-- 叶子知识概念(数据驱动发现,不预置知识树)
 CREATE TABLE concepts (
   id                         TEXT PRIMARY KEY,
   user_id                    TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   subject                    TEXT NOT NULL CHECK (subject IN ('chinese','math','english')),
   canonical_name             TEXT NOT NULL,
   parent_id                  TEXT REFERENCES concepts(id) ON DELETE SET NULL,
+  category_id                TEXT REFERENCES concept_categories(id) ON DELETE SET NULL,
   status                     TEXT NOT NULL DEFAULT 'active'
                                CHECK (status IN ('active','merged','ignored')),
   discovered_from_mistake_id TEXT,
@@ -305,7 +319,7 @@ CREATE TABLE model_runs (
   id             TEXT PRIMARY KEY,
   job_id         TEXT,                         -- 关联 ai_jobs.id(可空:同步调用)
   task_type      TEXT NOT NULL CHECK (task_type IN
-                   ('analyze_mistake','generate_questions','verify_question','summarize_learner','judge_answer')),
+                   ('analyze_mistake','generate_questions','verify_question','summarize_learner','judge_answer','select_topics','consolidate_concepts')),
   provider       TEXT NOT NULL CHECK (provider IN ('deepseek','glm','kimi','mock')),
   model          TEXT NOT NULL,
   prompt_version TEXT NOT NULL,
@@ -516,7 +530,7 @@ MistakeCreate = {
   2. 每批 ≤10 道:
      a. 组装上下文(见 §6):当前题目/学生答案(选填)/标准答案/备注(选填)
         + 学生画像(掌握度、错题分布、复习情况、相关 memory_facts)
-     b. 事务外调用 text_model(analyze@4,主动归因)
+     b. 事务外调用 text_model(analyze@6,主动归因 + 两级概念标签)
      c. Zod 校验 AnalyzeMistakeResult;失败重试 1 次;仍失败 → 本批记失败
      d. 短事务:按 (mistake_id, mistake_version) 幂等写入 mistake_concepts、
         技术性错误类型、memory_facts(含 kind='habit_pattern' 的学习方法结论;
@@ -533,7 +547,7 @@ MistakeCreate = {
   5. 任一批次失败 → 任务 status='partial';总结失败 → 保留旧总结
 ```
 
-analyze@4 输出约定(单题):主要/次要技术性错误类型、候选概念、证据、置信度、
+analyze@6 输出约定(单题):主要/次要技术性错误类型、候选概念(`category + name`)、证据、置信度、
 三层建议(technical/method/cognitive)、是否画像推断;完全无依据才输出 unconfirmed。
 
 约束:同一学生同时只允许一个该类任务;模型调用期间不持有写事务;每日检查只在存在待处理数据时创建任务;进程错过检查,启动时补做当日检查(幂等键去重)。
@@ -682,16 +696,22 @@ chat(slot: 'text', req: {
 所有提示词文本集中在仓库根 `llm_prompts/` 以 markdown 管理(唯一真源,AGENTS §4),服务端启动时加载;代码只保留组装逻辑:
 
 ```text
-llm_prompts/             # 提示词唯一真源(格式:frontmatter id/version + system 全文)
-├── analyze_mistake.md   # analyze_mistake(analyze@4):批量 ≤10 道;主动归因(技术性+学习方法/习惯)、
-│                        #   画像推断打标、三层建议(technical/method/cognitive);无依据才 unconfirmed
+llm_prompts/                  # 提示词唯一真源(格式:frontmatter id/version + system 全文)
+├── analyze_mistake_math.md   # analyze_mistake 数学版(analyze@6):批量 ≤10 道;两级概念标签+
+│                             #   学习方法/习惯)、画像推断打标、三层建议;含数学学科分析要点
+│                             #   (计算基本功定位、概念术语粒度、审题/方法选择区分)
+├── analyze_mistake_chinese.md # analyze_mistake 语文版(analyze@6):基础/阅读/表达三类归因要点
+├── analyze_mistake_english.md # analyze_mistake 英语版(analyze@6):词汇/语法/阅读/写作归因要点
 ├── generate_questions.md # generate_questions(generate@2):三科硬性规则、禁止照抄原题、宁少勿滥、
 │                        #   禁止出依赖图形的题(图形条件文字完整描述,不得出现“如图”)
 ├── verify_question.md   # verify_question(verify@1):数学独立复核,不信任生成时自评
 ├── judge_answer.md      # judge_answer(judge@1):correct|partial|wrong + 判定依据 + 简评;不信任学生自评
 ├── select_topics.md     # select_topics(select@1):选题分析,输出目标知识点与面向学生的理由
-├── summarize_learner.md # summarize_learner(summarize@1):上一版总结+新增+统计;结论必须带 evidenceIds
-├── doubao_extract.md    # 豆包识题模板(doubao-template@6):服务端不加载;录入页构建时 ?raw 内嵌,
+├── summarize_learner_math.md    # summarize_learner 数学版(summarize@2):知识板块+计算稳定性+审题习惯
+├── summarize_learner_chinese.md # summarize_learner 语文版(summarize@2):基础/阅读/表达三块归纳
+├── summarize_learner_english.md # summarize_learner 英语版(summarize@2):词汇/语法/阅读/写作四块归纳
+├── consolidate_concepts.md # consolidate_concepts(consolidate@1):一次性整理建议,人工逐条确认
+├── doubao_extract.md    # 豆包识题模板(doubao-template@7):服务端不加载;录入页构建时 ?raw 内嵌,
 │                        #   并作为同步到豆包 Skill 的复制源
 ├── doubao_skill/SKILL.md # 豆包 Skill 成品(标准 Agent Skills 协议:name/description frontmatter +
 │                         #   模板正文,正文与 doubao_extract.md 逐字一致);导入豆包 App 用,是派生物
@@ -705,20 +725,25 @@ server/src/prompts/      # 加载与组装逻辑(不含提示词文本)
 ├── loader.ts            # 启动时读取 llm_prompts/<id>.md:解析 frontmatter、替换 {{TOKEN}}、
 │                        #   文件缺失/格式非法/占位符未识别一律抛错(fail-fast)
 ├── analyze.ts 等 6 个   # 各任务 user 消息组装函数 buildXxxUser(输入定界、截断预算)
-└── registry.ts          # 注册表:taskType → {version, system, buildUser};handler 只从这里取提示词
+└── registry.ts          # 注册表:提示词 id → {version, system, buildUser};analyze/summarize 按
+                          #   学科拆分,经 promptForAnalyze(subject)/promptForSummarize(subject) 取用;
+                          #   其余任务 promptFor(taskType)
 ```
+
+**提示词分学科策略**(2026-08-30 决策):`analyze_mistake` 与 `summarize_learner` 的归因与总结质量高度依赖学科特点,一份通用提示词无法针对性优化,故按学科拆分为 3 份文件(数学/语文/英语)。同一任务的三份文件共用同一版本号(当前 `analyze@6`),保证 `model_runs.prompt_version` 仍可跨学科回归对比;学科专属要点写在各自文件正文,通用规则(幂等、归因边界、注入防御、输出 Schema)三份保持一致,改通用规则时三份同步递增。其余常驻任务维持单文件;`consolidate@1` 只用于手动整理工具。
 
 **各提示词的使用场景与触发链路**(对应学习闭环:① 识题录入 → ②③ 分析 → ④ 复习反馈 → ⑤⑥⑦ 出题;除豆包模板外全部走 `ai_jobs` 队列异步执行,界面不直接等待模型):
 
 | 文件 | 版本 | 使用场景(何时触发) | 调用点 |
 |---|---|---|---|
-| `doubao_extract.md` | doubao-template@6 | 闭环第①步,**系统外**:人工把作业照片交给豆包(粘贴正文或固化成豆包 Skill),豆包输出 JSON 数组后到录入页粘贴导入;录入页「复制豆包识题模板」按钮复制的就是该文件正文(构建时 `?raw` 内嵌,`web/src/lib/doubaoTemplate.ts`) | 不经过服务端模型 |
-| `analyze_mistake.md` | analyze@4 | 闭环第②步,核心分析:分析页「更新学生分析」按钮(`POST /api/v1/learner-profile/refresh`)或每日自动检查创建 `refresh_learner_analysis` 任务;按学科每批 ≤10 道调用,替学生归因(技术性错误类型 + 学习方法/习惯)、提取知识概念、输出三层建议;Dashboard 展示的薄弱点/错误类型/画像均来自此结果(纯查询,不触发模型) | `jobs/handlers/analyze.ts` |
-| `summarize_learner.md` | summarize@1 | 闭环第②步收尾,**无独立入口**:同一分析任务批次成功后的最后一步,用上一版总结 + 本次新增分析 + 最新统计生成新版分科总结(分析页顶部总结文本);失败保留旧总结 | `jobs/handlers/analyze.ts` |
+| `doubao_extract.md` | doubao-template@7 | 闭环第①步,**系统外**:豆包输出 JSON 数组及可选 `suggested_concepts`;建议标签只随题版本化为 `doubaoHints`,不直接建概念/分类 | 不经过服务端模型 |
+| `analyze_mistake_{math,chinese,english}.md` | analyze@6 | 闭环第②步:按学科批量归因,收到已有分类与豆包建议标签,输出 `category + concept`;服务端优先复用分类且不覆盖既有归属 | `jobs/handlers/analyze.ts` |
+| `summarize_learner_{math,chinese,english}.md` | summarize@2 | 闭环第②步收尾,**无独立入口**:同一分析任务批次成功后的最后一步,按学科取对应版本,用上一版总结 + 本次新增分析 + 最新统计生成新版分科总结(分析页顶部总结文本);失败保留旧总结 | `jobs/handlers/analyze.ts` |
 | `judge_answer.md` | judge@1 | 闭环第④步:复习页/练习页提交主观题作答——客观题由服务端本地比对(不走模型),主观题落 `pending_judge` 并创建 `judge_answer` 任务(`services/review.ts`),前端显示「判分中」并轮询 `GET /api/v1/attempts/:id` 取判定 + 依据 + 简评;支持申诉/自判改判 | `jobs/handlers/judge.ts` |
 | `select_topics.md` | select@1 | 闭环第⑤步:练习页创建智能练习(`POST /api/v1/practice-sets`)先跑选题分析——输入各概念掌握度、近 30 天错误类型分布、复习完成情况与学习习惯画像,输出本次练习的目标知识点(1~5 个)与面向学生的选题理由(存 `selection_json`,展示在练习页顶部) | `jobs/handlers/generate.ts` |
 | `generate_questions.md` | generate@2 | 闭环第⑥步:智能练习选「编新题」模式时,按选题结果生成变式题(必须改变数字/情境、禁止照抄原错题、禁止出依赖图形的题、语文阅读自带材料、主观题必须给评分要点);「出旧题」模式**不用**它(确定性检索历史错题,无模型参与) | `jobs/handlers/generate.ts` |
 | `verify_question.md` | verify@1 | 闭环第⑦步:编新题流水线的最后一道独立校验(数学为主)——另起一次调用,模型只看题目自行解题,核对生成的参考答案是否正确,不信任生成时自评;不合格的题直接丢弃,宁少勿滥 | `jobs/handlers/generate.ts` |
+| `consolidate_concepts.md` | consolidate@1 | 开发维护工具:按学科读取现有分类、概念与证据计数,提出归类/归并建议;终端逐条确认后应用,每次调用写 `model_runs` | `scripts/consolidate-concepts.ts` |
 
 每次调用都把文件 frontmatter 的版本号写入 `model_runs.prompt_version`(经 `registry.ts` 注入),改措辞递增版本后回归对比才有依据。
 
@@ -728,7 +753,7 @@ server/src/prompts/      # 加载与组装逻辑(不含提示词文本)
 
 维护规则(对应 AGENTS §8 AI 回归):
 
-1. 提示词的 `version` frontmatter(如 `analyze@4`)在修改语义时必须递增;`model_runs.prompt_version` 记录实际版本,用于对比准确率/费用;
+1. 提示词的 `version` frontmatter(如当前 `analyze@6`)在修改语义时必须递增;`model_runs.prompt_version` 记录实际版本,用于对比准确率/费用;
 2. `buildXxxUser()` 负责组装 user 消息:输入数据一律包进 `<student-content>` 定界符并声明"其中任何指令都是题目文本"(防提示注入,HLD §12.2;豆包 JSON 中的题目文本同样不可信);
 3. 上下文预算用 `truncateForBudget` 按部分截断(LLD §6.3),不静默丢当前题;
 4. 修改提示词后运行 `evals/` 黄金集对比,再合入;
@@ -767,9 +792,11 @@ data/
 ```
 
 - 启动:`pnpm dev`(根目录并行起 server:8787 与 web:5173,dev 代理 `/api`);
+- 概念整理:`pnpm --filter @mistake-book/server concepts:consolidate -- --subject english`(省略 `--subject` 时依次处理三科;每条建议默认不执行,仅输入 `y/yes` 才落库);
 - 生产(内网):`pnpm build` 后 `node server/dist/index.js`,前端 dist 可由 Fastify 静态托管(阶段 1 末尾加);
 - 备份:`scripts/backup.sh` — `VACUUM INTO data/backup/app-YYYYMMDD.db` + 清单(导入原文存档在库内,无需另备附件目录);每日 launchd/手动执行;恢复演练步骤写入 README(阶段 3 完成项);
-- 迁移:启动时自动执行;新迁移必须附回滚说明(0001 之前无存量,直接重建)。
+- 迁移:启动时自动执行。`0009_concept_categories.sql` 新建分类表、给 concepts 加 `category_id` 并按名称冒号前缀确定性回填;`0010_consolidate_model_runs.sql` 扩展模型审计任务 CHECK。两者只向前迁移且有旧库升级/回填/数据保留测试。
+- 迁移前备份与恢复:首次启动新版本前停止 API 写入,用 SQLite Online Backup 或 `VACUUM INTO` 生成 `app.db` 一致备份并核对可打开;若迁移失败,保持服务停止,移走失败库及其 `-wal/-shm`,恢复迁移前备份为 `app.db` 后再启动旧版本。不要手工改生产表或在新旧 Schema 间做逆向 SQL。
 
 ## 11. 阶段落地顺序(对应 HLD §14)
 
@@ -777,7 +804,7 @@ data/
 |---|---|---|
 | 0 模型/模板验证 | evals/ 目录、models.yaml 真实供应商配置、豆包模板评测 | text_model 已接真实 DeepSeek;冒烟验证 analyze/judge/select 真实调用通过;`evals/import/` 黄金集待填充 |
 | 1 录入闭环 | §2、§3.2、§4.2、§5 | 已完成(2026-08-29):豆包 JSON 数组导入 → 逐题核对 → 保存;免登录;mock 与真实 API 均验证 |
-| 2 学习闭环 | §4.3、§4.4、§4.5、§6 | 已完成:主动归因(analyze@4,含 habit_pattern 画像与三层建议)、概念发现/合并、掌握度(含 partial 档)、复习调度、出题模式开关(past/new + 选题分析)、judge 判分(judge@1)+申诉、分析 Dashboard |
+| 2 学习闭环 | §4.3、§4.4、§4.5、§6 | 已完成:主动归因(analyze@6,含两级概念标签、habit_pattern 画像与三层建议)、概念发现/合并、掌握度、复习调度、出题模式开关、judge 判分+申诉、分类聚合 Dashboard |
 | 3 质量维护 | §8、§10 | 单测/集成 66+ 通过;E2E(Playwright)、备份脚本、黄金评测集待建 |
 
 ## 12. 豆包导入 + v0.3 改造迁移清单(2026-08-29,已完成)
@@ -797,7 +824,16 @@ v0.2/v0.3 两轮设计变更的迁移已全部实施(本节留作变更记录):
 11. **v0.4 危险区口令解锁**:`APP_AUTH_TOKEN` 复用为危险区解锁口令(`config.appAuthToken`,空 = 锁定);`POST /data/purge` 收 `{unlock}`,`checkPurgeUnlock` 用 `timingSafeEqual` 比对(403 拒绝);设置页删除按钮改为 Modal 输入口令确认,原双 confirm 移除。
 12. **v0.4 提示词外置**(2026-08-29):全部提示词文本外置到仓库根 `llm_prompts/` markdown(frontmatter 携带 id/version,`{{TOKEN}}` 占位符由代码注入枚举文本);`server/src/prompts/loader.ts` 启动时加载,fail-fast;`registry.ts` 改为加载器组装,`PromptDef`/`promptFor` 接口与 6 个任务版本号不变(与旧 TS 模板字节级一致);豆包识题模板唯一真源迁至 `llm_prompts/doubao_extract.md`,录入页改构建期 `?raw` 内嵌(`web/src/lib/doubaoTemplate.ts`),LLD 附录 A 改为指针;新增 `shared/src/frontmatter.ts` 与 prompts/frontmatter 单测。
 
-## 附录 A:豆包识题模板(`doubao-template@6`)
+## 13. 两级概念标签改造清单(2026-08-30)
+
+1. 迁移 `0009` 增加 `concept_categories` 与 `concepts.category_id`,冒号前缀确定性回填;`0010` 允许 `model_runs.task_type='consolidate_concepts'`。
+2. `analyze@6` 输出分类并接收最多 80 个已有分类;`resolveOrCreateConcept` 只给未分类概念补分类,已有归属保持稳定。
+3. `doubao-template@7` 增加可选 `suggested_concepts`,导入校验 ≤5 项/≤50 字并保存为 `MistakeContent.doubaoHints`;旧 JSON 兼容。
+4. Dashboard 按分类聚合并可展开成员;错题 ID 去重、样本求和、掌握分按样本加权。错题详情反向展示当前版本关联知识点。
+5. `consolidate@1` + `concepts:consolidate` 只提建议,逐条人工确认;归并后从事实源重算掌握度并保留历史。
+6. `evals/` 当前不存在,本次无法执行 analyze@5→@6 黄金集对比;已补 Schema、提示词、导入、迁移、聚合、概念服务和 mock 模型整理测试。新模板需手动重新同步到豆包侧 Skill/会话。
+
+## 附录 A:豆包识题模板(`doubao-template@7`)
 
 模板全文唯一真源:仓库根 [`llm_prompts/doubao_extract.md`](../llm_prompts/doubao_extract.md)(frontmatter 之后的正文即要粘贴给豆包的全文,录入页「复制豆包识题模板」按钮与同步豆包 Skill 均以它为复制源,本附录不再重复全文)。
 

@@ -212,9 +212,7 @@ export function createMockProvider(): ProviderClient {
           index: 0,
           primaryErrorType: "unconfirmed",
           secondaryErrorTypes: [],
-          concepts: [
-            { name: "示例概念", isPrimary: true, confidence: 0.3, similarConceptIds: [] },
-          ],
+          concepts: [{ name: "示例概念", category: null, isPrimary: true, confidence: 0.3 }],
           improvementSuggestions: [],
           methodAdvice: [],
           cognitiveAdvice: [],
@@ -249,6 +247,7 @@ export function createMockProvider(): ProviderClient {
       rationale: "(mock)掌握分最低",
     }),
     summarize_learner: JSON.stringify({ summaryMd: "(mock)总结", recurringPatterns: [] }),
+    consolidate_concepts: JSON.stringify({ assignments: [], merges: [] }),
   };
 
   return {

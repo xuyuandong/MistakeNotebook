@@ -2,17 +2,21 @@ import { eq, sql } from "drizzle-orm";
 import {
   aiJobs,
   attempts,
+  conceptCategories,
   concepts,
+  generatedQuestions,
   learnerSummaries,
   learningEvents,
   mastery,
+  mistakeConcepts,
   mistakes,
   memoryFacts,
+  reviewSchedules,
 } from "../db/schema.js";
 import type { Db } from "../db/client.js";
-import type { Subject } from "@mistake-book/shared";
+import { Subjects, type Subject } from "@mistake-book/shared";
 import { createJob } from "../jobs/queue.js";
-import { localDate } from "./review.js";
+import { isGraduated, localDate } from "./review.js";
 
 /** 待分析数量(Dashboard 纯查询) */
 export function pendingCount(db: Db, userId: string): number {
@@ -110,44 +114,126 @@ export function analytics(db: Db, userId: string) {
     .from(mastery)
     .where(eq(mastery.userId, userId))
     .all();
-  const weaknessesFinal = rows
+  // 知识点 ↔ 未归档错题关联(错题总数 / 已掌握列的数据源)
+  const mistakeRows = db
+    .select()
+    .from(mistakes)
+    .all()
+    .filter((m) => m.userId === userId && m.archived === 0);
+  const mistakeById = new Map(mistakeRows.map((m) => [m.id, m]));
+  const conceptMistakes = new Map<string, Set<string>>();
+  for (const link of db.select().from(mistakeConcepts).all()) {
+    if (!mistakeById.has(link.mistakeId)) continue;
+    const ids = conceptMistakes.get(link.conceptId) ?? new Set<string>();
+    ids.add(link.mistakeId);
+    conceptMistakes.set(link.conceptId, ids);
+  }
+  const categories = new Map(
+    db
+      .select()
+      .from(conceptCategories)
+      .all()
+      .filter((c) => c.userId === userId && c.status === "active")
+      .map((c) => [c.id, c]),
+  );
+  const graduatedCache = new Map<string, boolean>();
+  const graduated = (mistakeId: string) => {
+    if (!graduatedCache.has(mistakeId)) {
+      graduatedCache.set(mistakeId, isGraduated(db, userId, mistakeId));
+    }
+    return graduatedCache.get(mistakeId) ?? false;
+  };
+
+  /**
+   * 叶子概念仍是掌握度与证据的计算单位;分类只做稳定的聚合视角。
+   * 同一分类中的多个概念可能关联同一道错题,分类行按错题 ID 并集去重;
+   * 分类掌握分按作答样本数加权,无样本时取成员初始分均值。
+   */
+  const members = rows
     .map((c) => {
       const m = masteryRows.find((x) => x.conceptId === c.id);
+      const linked = conceptMistakes.get(c.id) ?? new Set<string>();
       return {
         conceptId: c.id,
         name: c.canonicalName,
         subject: c.subject,
+        categoryId: c.categoryId && categories.has(c.categoryId) ? c.categoryId : null,
         score: m?.score ?? 50,
         sampleCount: m?.sampleCount ?? 0,
         lastPracticedAt: m?.lastPracticedAt ?? null,
+        mistakeIds: linked,
+        mistakeCount: linked.size,
+        graduatedCount: [...linked].filter(graduated).length,
+        insufficient: (m?.sampleCount ?? 0) < 3,
       };
     })
-    .sort((a, b) => a.score - b.score)
-    .slice(0, 10)
-    .map((w) => ({ ...w, insufficient: w.sampleCount < 3 }));
+    // 零证据概念不进薄弱点:无关联错题且无作答样本。
+    .filter((m) => m.mistakeCount > 0 || m.sampleCount > 0);
+
+  const groups = new Map<string, typeof members>();
+  for (const member of members) {
+    // concept/category 主键都为全局 UUID;复用真实 ID 让前端 key 与追溯更直接。
+    const key = member.categoryId ?? member.conceptId;
+    const grouped = groups.get(key) ?? [];
+    grouped.push(member);
+    groups.set(key, grouped);
+  }
+
+  // 服务端返回全部分类聚合行(按掌握分升序),Top N 由前端按学科切片。
+  const weaknessesFinal = [...groups.entries()]
+    .map(([groupId, grouped]) => {
+      const first = grouped[0];
+      const mistakeIds = new Set(grouped.flatMap((m) => [...m.mistakeIds]));
+      const sampleCount = grouped.reduce((sum, m) => sum + m.sampleCount, 0);
+      const score = sampleCount > 0
+        ? Math.round(
+            grouped.reduce((sum, m) => sum + m.score * m.sampleCount, 0) / sampleCount,
+          )
+        : Math.round(grouped.reduce((sum, m) => sum + m.score, 0) / grouped.length);
+      const practiced = grouped
+        .map((m) => m.lastPracticedAt)
+        .filter((v): v is string => Boolean(v))
+        .sort()
+        .at(-1) ?? null;
+      const category = first.categoryId ? categories.get(first.categoryId) : null;
+      return {
+        conceptId: groupId,
+        name: category?.canonicalName ?? first.name,
+        subject: first.subject,
+        score,
+        sampleCount,
+        lastPracticedAt: practiced,
+        mistakeCount: mistakeIds.size,
+        graduatedCount: [...mistakeIds].filter(graduated).length,
+        insufficient: sampleCount < 3,
+        members: grouped
+          .map(({ mistakeIds: _mistakeIds, categoryId: _categoryId, ...member }) => member)
+          .sort((a, b) => a.score - b.score || a.name.localeCompare(b.name, "zh-Hans-CN")),
+      };
+    })
+    .sort((a, b) => a.score - b.score || a.name.localeCompare(b.name, "zh-Hans-CN"));
 
   const since = new Date(Date.now() - 30 * 86_400_000).toISOString();
   const errorTypeCounts = new Map<string, number>();
-  for (const m of db
-    .select()
-    .from(mistakes)
-    .all()
-    .filter(
-      (m) =>
-        m.userId === userId &&
-        m.errorType &&
-        m.createdAt >= since &&
-        m.archived === 0,
-    )) {
-    errorTypeCounts.set(m.errorType!, (errorTypeCounts.get(m.errorType!) ?? 0) + 1);
+  for (const m of mistakeRows.filter(
+    (m) => m.errorType && m.createdAt >= since,
+  )) {
+    const key = `${m.subject}|${m.errorType}`;
+    errorTypeCounts.set(key, (errorTypeCounts.get(key) ?? 0) + 1);
   }
 
   return {
     weaknesses: weaknessesFinal,
+    // 错误类型按学科分组(前端提供 全部/学科 筛选)
     errorTypes: [...errorTypeCounts.entries()]
-      .map(([errorType, count]) => ({ errorType, count }))
+      .map(([key, count]) => {
+        const [subject, errorType] = key.split("|");
+        return { subject, errorType, count };
+      })
       .sort((a, b) => b.count - a.count),
-    // 学习方法画像(PRD 5.4 视图 4):AI 画像推断,可被学生纠正
+    // 分学科错题与学习状态统计(PRD 5.4)
+    subjects: subjectStats(db, userId),
+    // 学习方法画像(PRD 5.4 视图 4):AI 画像推断,可被学生纠正;带学科供前端分科过滤
     habits: db
       .select()
       .from(memoryFacts)
@@ -157,8 +243,110 @@ export function analytics(db: Db, userId: string) {
       )
       .sort((a, b) => b.confidence - a.confidence)
       .slice(0, 10)
-      .map((f) => ({ statement: f.statement, confidence: f.confidence, status: f.status })),
+      .map((f) => ({
+        statement: f.statement,
+        scope: f.scope,
+        confidence: f.confidence,
+        status: f.status,
+      })),
   };
+}
+
+/** 分学科错题与学习状态统计(纯查询;固定返回三科,便于前端稳定展示) */
+export interface SubjectStat {
+  subject: Subject;
+  mistakeTotal: number;
+  /** 待分析 = pending_analysis + waiting_input(都还未完成归因) */
+  pendingAnalysis: number;
+  analyzed: number;
+  /** 进行中的复习排期(scheduled)与其中逾期数 */
+  reviewScheduled: number;
+  reviewOverdue: number;
+  /** 已毕业错题数(尾部连续答对达阈值且无未完成排期) */
+  graduated: number;
+  /** 近 30 天已判分作答数(correct/partial/wrong)、其中正确数与正确率 */
+  attempts30d: number;
+  correct30d: number;
+  correctRate30d: number | null;
+  conceptCount: number;
+  /** 活跃知识点掌握分均值(无掌握度记录按初始 50 计) */
+  avgMastery: number | null;
+}
+
+export function subjectStats(db: Db, userId: string): SubjectStat[] {
+  const today = localDate();
+  const since = new Date(Date.now() - 30 * 86_400_000).toISOString();
+  const mistakeRows = db
+    .select()
+    .from(mistakes)
+    .all()
+    .filter((m) => m.userId === userId && m.archived === 0);
+  const mistakeSubjectById = new Map(mistakeRows.map((m) => [m.id, m.subject]));
+  const conceptRows = db
+    .select()
+    .from(concepts)
+    .all()
+    .filter((c) => c.userId === userId && c.status === "active");
+  const masteryRows = db
+    .select()
+    .from(mastery)
+    .where(eq(mastery.userId, userId))
+    .all();
+  const scheduleRows = db
+    .select()
+    .from(reviewSchedules)
+    .all()
+    .filter((r) => r.userId === userId);
+  const gqSubject = new Map(
+    db
+      .select()
+      .from(generatedQuestions)
+      .all()
+      .filter((g) => g.userId === userId)
+      .map((g) => [g.id, g.subject]),
+  );
+  const attemptRows = db
+    .select()
+    .from(attempts)
+    .all()
+    .filter((a) => a.userId === userId);
+
+  return Subjects.map((subject) => {
+    const ms = mistakeRows.filter((m) => m.subject === subject);
+    const attemptsSub = attemptRows.filter((a) => {
+      if (a.createdAt < since) return false;
+      const subj =
+        a.sourceType === "mistake_review"
+          ? mistakeSubjectById.get(a.sourceId)
+          : gqSubject.get(a.sourceId);
+      return subj === subject;
+    });
+    const scored = attemptsSub.filter(
+      (a) => a.result === "correct" || a.result === "partial" || a.result === "wrong",
+    );
+    const correct = scored.filter((a) => a.result === "correct").length;
+    const cRows = conceptRows.filter((c) => c.subject === subject);
+    const scores = cRows.map((c) => masteryRows.find((x) => x.conceptId === c.id)?.score ?? 50);
+    const scheduled = scheduleRows.filter(
+      (r) => r.status === "scheduled" && mistakeSubjectById.get(r.mistakeId) === subject,
+    );
+    return {
+      subject,
+      mistakeTotal: ms.length,
+      pendingAnalysis: ms.filter((m) => m.status !== "analyzed").length,
+      analyzed: ms.filter((m) => m.status === "analyzed").length,
+      reviewScheduled: scheduled.length,
+      reviewOverdue: scheduled.filter((r) => r.dueDate < today).length,
+      graduated: ms.filter((m) => isGraduated(db, userId, m.id)).length,
+      attempts30d: scored.length,
+      correct30d: correct,
+      correctRate30d: scored.length ? Math.round((correct / scored.length) * 100) : null,
+      conceptCount: cRows.length,
+      avgMastery: scores.length
+        ? Math.round(scores.reduce((sum, s) => sum + s, 0) / scores.length)
+        : null,
+    };
+  });
 }
 
 /** 数据导出:JSON 全量事实源(PRD 5.5) */
@@ -167,6 +355,11 @@ export function exportJson(db: Db, userId: string) {
     exportedAt: new Date().toISOString(),
     mistakes: db.select().from(mistakes).all().filter((m) => m.userId === userId),
     attempts: db.select().from(attempts).all().filter((a) => a.userId === userId),
+    conceptCategories: db
+      .select()
+      .from(conceptCategories)
+      .all()
+      .filter((c) => c.userId === userId),
     concepts: db.select().from(concepts).all().filter((c) => c.userId === userId),
     learningEvents: db
       .select()
@@ -222,6 +415,7 @@ export function deleteAllData(db: Db, userId: string): void {
       "review_schedules",
       "mistakes",
       "concepts",
+      "concept_categories",
       "ingestion_drafts",
       "import_batches",
       "learning_events",

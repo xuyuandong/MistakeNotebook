@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { Card, Group, Loader, Stack, Text, Button, Box, ThemeIcon } from "@mantine/core";
+import { Card, Group, Loader, Stack, Text, Button, Box, ThemeIcon, SegmentedControl } from "@mantine/core";
 import {
   IconChevronRight,
   IconNotebook,
@@ -23,31 +23,52 @@ interface MistakeItem {
 export function MistakesPage() {
   const [items, setItems] = useState<MistakeItem[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [subject, setSubject] = useState("all");
 
   const load = useCallback(async () => {
     try {
-      const res = await api<{ items: MistakeItem[] }>("/api/v1/mistakes?limit=50");
+      setError(null);
+      const query = new URLSearchParams({ limit: "50" });
+      if (subject !== "all") query.set("subject", subject);
+      const res = await api<{ items: MistakeItem[] }>(`/api/v1/mistakes?${query}`);
       setItems(res.items);
     } catch (e) {
       setError((e as Error).message);
     }
-  }, []);
+  }, [subject]);
 
   useEffect(() => {
+    setItems(null);
     void load();
   }, [load]);
+
+  const subjectLabel = subject === "all" ? "全部学科" : SUBJECT_LABELS[subject] ?? subject;
 
   return (
     <div style={{ maxWidth: "var(--app-content-w)" }}>
       <PageHeader
         icon={IconNotebook}
         title="错题库"
-        description={items ? `共 ${items.length} 道错题` : "所有录入的错题"}
+        description={items ? `${subjectLabel} · 共 ${items.length} 道错题` : `${subjectLabel}错题`}
         actions={
           <Button variant="light" leftSection={<IconRefresh size={16} />} onClick={() => void load()}>
             刷新
           </Button>
         }
+      />
+
+      <SegmentedControl
+        mb="md"
+        value={subject}
+        onChange={setSubject}
+        data={[
+          { value: "all", label: "全部" },
+          { value: "chinese", label: "语文" },
+          { value: "math", label: "数学" },
+          { value: "english", label: "英语" },
+        ]}
+        fullWidth
+        aria-label="按学科筛选错题"
       />
 
       {error && (
@@ -60,8 +81,10 @@ export function MistakesPage() {
       {items !== null && items.length === 0 && (
         <EmptyState
           icon={IconNotebook}
-          title="还没有错题"
-          hint="去「导入录入」把豆包识别的 JSON 导入,或手动补录第一道错题。"
+          title={subject === "all" ? "还没有错题" : `还没有${subjectLabel}错题`}
+          hint={subject === "all"
+            ? "去「导入录入」把豆包识别的 JSON 导入,或手动补录第一道错题。"
+            : "可以切换到其他学科,或去「导入录入」补录错题。"}
         />
       )}
 

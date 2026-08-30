@@ -34,6 +34,14 @@ interface MistakeDetail {
   analysisConfidence: number | null;
   needsFollowUp: number;
   followUpQuestion: string | null;
+  concepts: {
+    id: string;
+    name: string;
+    category: string | null;
+    isPrimary: boolean;
+    evidence: string | null;
+    confidence: number | null;
+  }[];
   content: {
     stemMd: string;
     myAnswer?: string;
@@ -127,7 +135,7 @@ export function MistakeDetailPage() {
   if (error) return <Text c="red">{error}</Text>;
   if (!item) return <Loader />;
 
-  // analyze@4:三层建议 {technical, method, cognitive, profileInferred};兼容旧数组
+  // analyze@4+ 三层建议 {technical, method, cognitive, profileInferred};兼容旧数组
   const advice: unknown = item.improvementsJson
     ? JSON.parse(item.improvementsJson)
     : null;
@@ -203,6 +211,26 @@ export function MistakeDetailPage() {
           </>
         )}
       </Card>
+
+      {item.concepts.length > 0 && (
+        <Card className="app-panel" withBorder>
+          <Text fw={700} fz={15} mb="xs">
+            关联知识点
+          </Text>
+          <Group gap="xs">
+            {item.concepts.map((concept) => (
+              <Badge
+                key={concept.id}
+                variant={concept.isPrimary ? "filled" : "light"}
+                color={concept.isPrimary ? "brand" : "gray"}
+                title={concept.evidence ?? undefined}
+              >
+                {concept.category ? `${concept.category} · ${concept.name}` : concept.name}
+              </Badge>
+            ))}
+          </Group>
+        </Card>
+      )}
 
       {item.needsFollowUp === 1 && item.followUpQuestion && (
         <Alert color="yellow" title="AI 需要补充信息">

@@ -1,6 +1,7 @@
 import { and, eq, inArray } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import {
+  conceptCategories,
   concepts,
   generatedQuestions,
   mastery,
@@ -10,6 +11,7 @@ import {
   modelRuns,
   practiceSets,
 } from "../../db/schema.js";
+import type { Db } from "../../db/client.js";
 import {
   GeneratedQuestion,
   GenerateQuestionsResult,
@@ -273,9 +275,11 @@ export function makeGenerateHandler(ctx: HandlerContext & { rawStore: RawRunStor
         }
       }
 
-      // 概念名 → 概念 ID(无则创建,保证出题也能发现新概念)
+      // 概念名 → 概念 ID(无则创建,保证出题也能发现新概念);
+      // 两级标签:新建概念继承本次选题目标概念的分类,继承不到则未分类
+      const inheritedCategory = inheritCategoryForSet(db, job.userId, subject, set.selectionJson);
       const conceptIds = q.concepts.map((name) =>
-        resolveOrCreateConcept(db, job.userId, subject, name),
+        resolveOrCreateConcept(db, job.userId, subject, name, undefined, 0.5, inheritedCategory),
       );
 
       db.insert(generatedQuestions)
@@ -523,4 +527,45 @@ function finishSet(
     })
     .where(eq(practiceSets.id, setId))
     .run();
+}
+
+/**
+ * 两级标签:练习集所有已分类目标概念属于同一分类时,新建概念才继承该分类。
+ * 多目标跨分类时无法可靠判断每个生成概念归属,宁可保持未分类等待后续整理。
+ */
+function inheritCategoryForSet(
+  db: Db,
+  userId: string,
+  subject: Subject,
+  selectionJson: string | null,
+): string | null {
+  if (!selectionJson) return null;
+  try {
+    const selection = JSON.parse(selectionJson) as { targetConcepts?: string[] };
+    const categoryNames = new Set<string>();
+    for (const name of selection.targetConcepts ?? []) {
+      const row = db
+        .select()
+        .from(concepts)
+        .where(
+          and(
+            eq(concepts.userId, userId),
+            eq(concepts.subject, subject),
+            eq(concepts.canonicalName, name),
+          ),
+        )
+        .get();
+      if (!row?.categoryId) continue;
+      const cat = db
+        .select()
+        .from(conceptCategories)
+        .where(eq(conceptCategories.id, row.categoryId))
+        .get();
+      if (cat && cat.status === "active") categoryNames.add(cat.canonicalName);
+    }
+    return categoryNames.size === 1 ? [...categoryNames][0] : null;
+  } catch {
+    // selectionJson 损坏不影响出题,概念按未分类创建
+  }
+  return null;
 }

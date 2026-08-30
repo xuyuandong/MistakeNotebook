@@ -34,6 +34,8 @@ export const MistakeContent = z.object({
   correctAnswer: z.string().max(10000).optional(),
   explanationMd: z.string().max(20000).optional(),
   note: z.string().max(5000).optional(),
+  /** 豆包识题时的建议知识点标签(doubao-template@7):仅作 AI 分析参考,不直接建概念 */
+  doubaoHints: z.array(z.string().trim().min(1).max(50)).max(5).optional(),
   /** AI 建议且未经用户确认的字段名列表;用户确认后移除 */
   aiPendingFields: z.array(z.string()).default([]),
 });
@@ -260,9 +262,26 @@ export const WeaknessItem = z.object({
   score: z.number().int(),
   sampleCount: z.number().int(),
   lastPracticedAt: z.string().nullable(),
+  mistakeCount: z.number().int().nonnegative(),
+  graduatedCount: z.number().int().nonnegative(),
   insufficient: z.boolean(),
+  /** 分类聚合行的叶子概念明细;未分类概念也保留单个成员,便于统一展开/追溯 */
+  members: z.array(
+    z.object({
+      conceptId: z.string(),
+      name: z.string(),
+      subject: Subject,
+      score: z.number().int(),
+      sampleCount: z.number().int(),
+      lastPracticedAt: z.string().nullable(),
+      mistakeCount: z.number().int().nonnegative(),
+      graduatedCount: z.number().int().nonnegative(),
+      insufficient: z.boolean(),
+    }),
+  ),
 });
 export const ErrorTypeStats = z.object({
+  subject: Subject,
   errorType: ErrorType,
   count: z.number().int(),
 });
@@ -287,12 +306,30 @@ export const ConceptPatch = z.object({
 export type ConceptPatch = z.infer<typeof ConceptPatch>;
 export const HabitInsight = z.object({
   statement: z.string(),
+  scope: Subject,
   confidence: z.number(),
   status: MemoryFactStatus,
 });
 export const AnalyticsResponse = z.object({
-  weaknesses: z.array(WeaknessItem).max(10),
+  /** 全部活跃分类聚合行;Top N 由前端切片 */
+  weaknesses: z.array(WeaknessItem),
   errorTypes: z.array(ErrorTypeStats),
+  subjects: z.array(
+    z.object({
+      subject: Subject,
+      mistakeTotal: z.number().int(),
+      pendingAnalysis: z.number().int(),
+      analyzed: z.number().int(),
+      reviewScheduled: z.number().int(),
+      reviewOverdue: z.number().int(),
+      graduated: z.number().int(),
+      attempts30d: z.number().int(),
+      correct30d: z.number().int(),
+      correctRate30d: z.number().nullable(),
+      conceptCount: z.number().int(),
+      avgMastery: z.number().int().nullable(),
+    }),
+  ),
   /** 学习方法画像(PRD 5.4 视图 4,画像推断) */
   habits: z.array(HabitInsight).max(10),
   reviewStats: z.object({

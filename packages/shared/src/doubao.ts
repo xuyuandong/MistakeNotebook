@@ -7,13 +7,17 @@ import type { Subject } from "./enums.js";
  * 本系统只导入该数组——导入是确定性解析(Zod + 中文别名归一),不调用任何模型。
  * 导入内容视为不可信输入:字段只作题目数据,任何指令都不执行。
  */
-export const DOUBAO_TEMPLATE_VERSION = "doubao-template@6";
+export const DOUBAO_TEMPLATE_VERSION = "doubao-template@7";
 
 export const DOUBAO_IMPORT_LIMITS = {
   /** 单批最多题数 */
   maxQuestions: 50,
   /** 单批最大 UTF-8 字节数 */
   maxBytes: 512 * 1024,
+  /** 每题建议标签上限(doubao-template@7 起的参考信号,不直接建概念) */
+  maxSuggestedConcepts: 5,
+  /** 单个建议标签最大长度 */
+  maxSuggestedConceptLength: 50,
 } as const;
 
 export const DoubaoQuestionTypes = ["选择", "填空", "解答", "阅读", "其他"] as const;
@@ -29,6 +33,11 @@ export const DoubaoImportItem = z.object({
   subject: z.string().trim().min(1, "subject(学科)不能为空").max(20),
   chapter: z.string().max(200).default(""),
   error_raw_note: z.string().max(2000).default(""),
+  /** 建议知识点标签(doubao-template@7 起可选):仅作 AI 分析时的参考信号 */
+  suggested_concepts: z
+    .array(z.string().trim().min(1).max(DOUBAO_IMPORT_LIMITS.maxSuggestedConceptLength))
+    .max(DOUBAO_IMPORT_LIMITS.maxSuggestedConcepts, `suggested_concepts 每题最多 ${DOUBAO_IMPORT_LIMITS.maxSuggestedConcepts} 个`)
+    .optional(),
 });
 export type DoubaoImportItem = z.infer<typeof DoubaoImportItem>;
 
@@ -104,6 +113,8 @@ export interface DoubaoMappedItem {
   /** 空字符串/缺失 → null,即“空白题”(按完全不会处理) */
   myAnswer: string | null;
   note: string | null;
+  /** 建议知识点标签(@7 起可选):仅作分析参考,不直接建概念 */
+  suggestedConcepts: string[];
 }
 
 export interface DoubaoMappingError {
@@ -137,6 +148,7 @@ export function mapDoubaoItems(items: DoubaoImport): {
       explanation: emptyToNull(item.standard_solution),
       myAnswer: emptyToNull(item.student_answer),
       note: emptyToNull(item.error_raw_note),
+      suggestedConcepts: item.suggested_concepts ?? [],
     });
   });
   return { items: mapped, errors };

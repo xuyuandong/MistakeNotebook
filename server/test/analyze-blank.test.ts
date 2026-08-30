@@ -71,7 +71,7 @@ function batchResult(primaryErrorType: string, concept: string, needsFollowUp = 
         primaryErrorType,
         secondaryErrorTypes: [],
         concepts: [
-          { name: concept, isPrimary: true, confidence: 0.9, similarConceptIds: [] },
+          { name: concept, category: "方程", isPrimary: true, confidence: 0.9 },
         ],
         improvementSuggestions: [],
         needsFollowUp,
@@ -117,7 +117,7 @@ describe("空白题按完全不会处理(用户 2026-08-29 决策)", () => {
     expect(row.needsFollowUp).toBe(0); // 不追问
     expect(row.followUpQuestion).toBeNull();
     expect(row.status).toBe("analyzed"); // 不留在待补充
-    expect(row.analysisPromptVersion).toBe("analyze@4");
+    expect(row.analysisPromptVersion).toBe("analyze@6");
     expect(ctx.db.all<{ c: number }>(sql`SELECT COUNT(*) c FROM concepts`)[0].c).toBe(1);
   });
 

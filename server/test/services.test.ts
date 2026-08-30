@@ -11,7 +11,8 @@ import {
 } from "../src/services/mistakes.js";
 import { createDb, type Db } from "../src/db/client.js";
 import { runMigrations } from "../src/db/migrator.js";
-import { importBatches, ingestionDrafts, learningEvents, mistakes } from "../src/db/schema.js";
+import { importBatches, ingestionDrafts, learningEvents, mistakeConcepts, mistakes } from "../src/db/schema.js";
+import { resolveOrCreateConcept } from "../src/services/concepts.js";
 
 const MIGRATIONS_DIR = fileURLToPath(new URL("../migrations", import.meta.url));
 
@@ -184,5 +185,40 @@ describe("错题服务", () => {
     const detail = getMistake(db, "u_local", id);
     expect(detail.version).toBe(1);
     expect(detail.content.stemMd).toContain("解方程");
+  });
+
+  test("详情返回当前版本关联知识点与分类", () => {
+    const db = freshDb();
+    const { id } = createMistake(db, "u_local", manualInput);
+    const conceptId = resolveOrCreateConcept(
+      db,
+      "u_local",
+      "math",
+      "去分母",
+      id,
+      0.9,
+      "一元一次方程",
+    );
+    db.insert(mistakeConcepts)
+      .values({
+        id: crypto.randomUUID(),
+        mistakeId: id,
+        conceptId,
+        mistakeVersion: 1,
+        isPrimary: 1,
+        evidence: "移项出错",
+        confidence: 0.9,
+        createdAt: new Date().toISOString(),
+      })
+      .run();
+
+    expect(getMistake(db, "u_local", id).concepts).toEqual([
+      expect.objectContaining({
+        id: conceptId,
+        name: "去分母",
+        category: "一元一次方程",
+        isPrimary: true,
+      }),
+    ]);
   });
 });

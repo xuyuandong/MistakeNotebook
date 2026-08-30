@@ -61,7 +61,7 @@ describe("豆包 JSON 导入(LLD §4.2,确定性解析零模型)", () => {
     expect(second.myAnswer).toBeNull(); // 空白题
 
     const batch = db.select().from(importBatches).all()[0];
-    expect(batch.templateVersion).toBe("doubao-template@6");
+    expect(batch.templateVersion).toBe("doubao-template@7");
     expect(batch.source).toBe("一元一次方程"); // 首个非空 chapter
 
     // 完全相同内容再导 → duplicate 提醒但落库不阻断
@@ -75,6 +75,31 @@ describe("豆包 JSON 导入(LLD §4.2,确定性解析零模型)", () => {
     const obj = JSON.stringify({ questions: [{ question: "题", subject: "数学" }] });
     expect(() => importDoubaoJson(db, "u_local", obj)).toThrow(/JSON 数组/);
     expect(db.select().from(importBatches).all()).toHaveLength(0);
+  });
+
+  test("suggested_concepts 可选兼容;合法值写入 doubaoHints,超量或超长整批拒绝", () => {
+    const db = freshDb();
+    const accepted = JSON.stringify([
+      {
+        question: "Choose the right phrase.",
+        subject: "英语",
+        suggested_concepts: ["固定搭配", "词汇辨析"],
+      },
+    ]);
+    importDoubaoJson(db, "u_local", accepted);
+    const result = JSON.parse(db.select().from(ingestionDrafts).all()[0].resultJson!) as {
+      doubaoHints?: string[];
+    };
+    expect(result.doubaoHints).toEqual(["固定搭配", "词汇辨析"]);
+
+    const tooMany = JSON.stringify([
+      { question: "题", subject: "数学", suggested_concepts: ["1", "2", "3", "4", "5", "6"] },
+    ]);
+    const tooLong = JSON.stringify([
+      { question: "题", subject: "数学", suggested_concepts: ["x".repeat(51)] },
+    ]);
+    expect(() => importDoubaoJson(freshDb(), "u_local", tooMany)).toThrow(/最多 5 个/);
+    expect(() => importDoubaoJson(freshDb(), "u_local", tooLong)).toThrow(/50/);
   });
 
   test("question 为空 / subject 无法映射 → 定位下标报错,不落库", () => {

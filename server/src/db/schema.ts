@@ -95,6 +95,21 @@ export const ingestionDrafts = sqliteTable(
   (t) => [index("idx_drafts_batch").on(t.importBatchId, t.status)],
 );
 
+export const conceptCategories = sqliteTable(
+  "concept_categories",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id").notNull(),
+    subject: text("subject").notNull(),
+    canonicalName: text("canonical_name").notNull(),
+    status: text("status").notNull().default("active"),
+    mergedIntoId: text("merged_into_id"),
+    createdAt: text("created_at").notNull(),
+    updatedAt: text("updated_at").notNull(),
+  },
+  (t) => [uniqueIndex("uq_concept_category").on(t.userId, t.subject, t.canonicalName)],
+);
+
 export const concepts = sqliteTable(
   "concepts",
   {
@@ -103,6 +118,8 @@ export const concepts = sqliteTable(
     subject: text("subject").notNull(),
     canonicalName: text("canonical_name").notNull(),
     parentId: text("parent_id"),
+    /** 所属分类(两级标签,0009);可空 = 未分类。已有分类不被分析结果覆盖(防抖动) */
+    categoryId: text("category_id"),
     status: text("status").notNull().default("active"),
     discoveredFromMistakeId: text("discovered_from_mistake_id"),
     mergedIntoId: text("merged_into_id"),

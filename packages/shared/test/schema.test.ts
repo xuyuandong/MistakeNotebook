@@ -44,6 +44,14 @@ describe("豆包导入契约(doubao-import@2)", () => {
     expect(r.success).toBe(true);
   });
 
+  test("suggested_concepts 最多 5 个、每项最多 50 字,旧 JSON 不带字段仍兼容", () => {
+    expect(DoubaoImport.safeParse([{ ...item, suggested_concepts: ["固定搭配", "词汇辨析"] }]).success).toBe(true);
+    expect(DoubaoImport.safeParse([{ ...item, suggested_concepts: ["1", "2", "3", "4", "5", "6"] }]).success).toBe(false);
+    expect(DoubaoImport.safeParse([{ ...item, suggested_concepts: ["x".repeat(51)] }]).success).toBe(false);
+    const mapped = mapDoubaoItems(DoubaoImport.parse([{ ...item, suggested_concepts: ["固定搭配"] }]));
+    expect(mapped.items[0].suggestedConcepts).toEqual(["固定搭配"]);
+  });
+
   test("normalizeDoubaoImport:只接受数组,对象包装原样返回交由 Zod 整批拒绝", () => {
     expect(normalizeDoubaoImport([item])).toEqual([item]);
     expect(normalizeDoubaoImport({ questions: [item] })).toEqual({ questions: [item] });

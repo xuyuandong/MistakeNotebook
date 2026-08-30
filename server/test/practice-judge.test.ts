@@ -23,6 +23,7 @@ import { resolveOrCreateConcept } from "../src/services/concepts.js";
 import {
   addDays,
   appealAttempt,
+  finalizePendingAttempt,
   localDate,
   submitAttempt,
   todayReviews,
@@ -508,6 +509,130 @@ describe("依赖图形的题目不参与练习与复习(PRD 5.3/6.3)", () => {
     const stats = weeklyReviewStats(ctx.db, "u_local");
     expect(stats.planned).toBe(1); // 图形题的排期不计入
     expect(stats.overdue).toBe(0); // 图形题逾期不制造永久红字
+  });
+});
+
+/** 生成题作答不入错题库(用户 2026-08-30 决策):错题表唯一写入点是 createMistake(人工录入/豆包导入) */
+describe("生成题答错不算错题(用户 2026-08-30 决策)", () => {
+  function mkGeneratedQuestion(db: Db, type: "fill_blank" | "subjective") {
+    const conceptId = resolveOrCreateConcept(
+      db,
+      "u_local",
+      "math",
+      type === "fill_blank" ? "一元一次方程" : "去分母",
+    );
+    const setId = crypto.randomUUID();
+    db.insert(practiceSets)
+      .values({
+        id: setId,
+        userId: "u_local",
+        subject: "math",
+        origin: "smart",
+        paramsJson: "{}",
+        createdAt: new Date().toISOString(),
+      })
+      .run();
+    const id = crypto.randomUUID();
+    db.insert(generatedQuestions)
+      .values({
+        id,
+        practiceSetId: setId,
+        userId: "u_local",
+        subject: "math",
+        questionJson: JSON.stringify(
+          type === "fill_blank"
+            ? {
+                type: "fill_blank",
+                stemMd: "(新题)解方程 $3x-9=0$,则 $x=$ ____。",
+                answer: "3",
+                explanationMd: "移项得 3x=9。",
+                concepts: ["一元一次方程"],
+                difficulty: 2,
+                acceptableAnswers: [],
+              }
+            : {
+                type: "subjective",
+                stemMd: "(新题)说明去分母时为什么不能漏乘常数项。",
+                answer: "漏乘会破坏等式性质。",
+                explanationMd: "等式两边需同时乘同一数。",
+                concepts: ["去分母"],
+                difficulty: 2,
+                rubricMd: "答出等式性质即可。",
+              },
+        ),
+        conceptIdsJson: JSON.stringify([conceptId]),
+        status: "valid",
+        createdAt: new Date().toISOString(),
+      })
+      .run();
+    return { id, conceptId };
+  }
+
+  function assertNoMistake(db: Db) {
+    expect(countRows(db, "mistakes")).toBe(0);
+    const eventTypes = db.select().from(learningEvents).all().map((e) => e.eventType);
+    expect(eventTypes).toContain("practice_attempted");
+    expect(eventTypes).not.toContain("mistake_recorded");
+    expect(db.select().from(reviewSchedules).all()).toHaveLength(0); // 生成题不进复习排期
+  }
+
+  test("客观题答错:只写 attempts + practice_attempted,掌握度下降,不入错题库", () => {
+    const ctx = freshCtx();
+    const { id: qId, conceptId } = mkGeneratedQuestion(ctx.db, "fill_blank");
+
+    const res = submitAttempt(ctx.db, "u_local", {
+      sourceType: "generated_question",
+      sourceId: qId,
+      answer: "9",
+    });
+    expect(res.result).toBe("wrong");
+
+    assertNoMistake(ctx.db);
+    const attempt = ctx.db.select().from(attempts).all()[0];
+    expect(attempt.sourceType).toBe("generated_question");
+    expect(attempt.result).toBe("wrong");
+    const m = ctx.db.select().from(mastery).all().find((x) => x.conceptId === conceptId);
+    expect(m?.sampleCount).toBe(1);
+    expect(m!.score).toBeLessThan(50); // 作答仍更新掌握度(核心闭环保留)
+  });
+
+  test("主观题答错走 LLM 判分,判为错误后同样不入错题库", async () => {
+    const ctx = freshCtx();
+    const { id: qId } = mkGeneratedQuestion(ctx.db, "subjective");
+
+    const res = submitAttempt(ctx.db, "u_local", {
+      sourceType: "generated_question",
+      sourceId: qId,
+      answer: "不知道,随便写的",
+    });
+    expect(res.judging).toBe("llm");
+
+    // 判分落为错误(judge 任务与申诉共用的终态路径)
+    const attempt = ctx.db.select().from(attempts).all()[0];
+    expect(attempt.result).toBe("pending_judge");
+    const finalized = finalizePendingAttempt(
+      ctx.db,
+      "u_local",
+      attempt.id,
+      "wrong",
+      "llm",
+      { basis: "未答出等式性质", comment: "再想想" },
+    );
+    expect(finalized?.result).toBe("wrong");
+
+    assertNoMistake(ctx.db);
+  });
+
+  test("放弃作答同样只记 attempts,不入错题库", () => {
+    const ctx = freshCtx();
+    const { id: qId } = mkGeneratedQuestion(ctx.db, "fill_blank");
+    const res = submitAttempt(ctx.db, "u_local", {
+      sourceType: "generated_question",
+      sourceId: qId,
+      gaveUp: true,
+    });
+    expect(res.result).toBe("gave_up");
+    assertNoMistake(ctx.db);
   });
 });
 

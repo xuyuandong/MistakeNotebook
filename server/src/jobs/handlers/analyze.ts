@@ -21,8 +21,8 @@ import { parseModelJson, normalizeAnalyzeBatch } from "../../ai/parse.js";
 import type { JobRecord } from "../queue.js";
 import type { JobHandler } from "../loop.js";
 import type { HandlerContext } from "./judge.js";
-import { promptFor, ERROR_TYPE_NAMES } from "../../prompts/registry.js";
-import { resolveOrCreateConcept } from "../../services/concepts.js";
+import { promptForAnalyze, promptForSummarize, ERROR_TYPE_NAMES } from "../../prompts/registry.js";
+import { resolveOrCreateConcept, listCategoriesForSubject } from "../../services/concepts.js";
 import { recomputeMasteryForConcept } from "../../services/mastery.js";
 import { reviveGraduatedForConcept } from "../../services/review.js";
 import type { Db } from "../../db/client.js";
@@ -35,6 +35,18 @@ interface PendingMistake {
   version: number;
   contentJson: string;
   gradeAtTime: string | null;
+}
+
+interface AnalysisPayload {
+  index: number;
+  questionMd: string;
+  options?: string[];
+  myAnswer?: string;
+  correctAnswer?: string;
+  note?: string;
+  gradeAtTime?: string | null;
+  /** 豆包识题建议标签(doubao-template@7):仅作分析参考 */
+  doubaoHints?: string[];
 }
 
 /** 水位语义:只处理 learning_event.occurred_at <= 水位的题目(任务期间新录入留给下一次)。
@@ -84,16 +96,6 @@ function loadPending(
   });
 }
 
-interface AnalysisPayload {
-  index: number;
-  questionMd: string;
-  options?: string[];
-  myAnswer?: string;
-  correctAnswer?: string;
-  note?: string;
-  gradeAtTime?: string | null;
-}
-
 /**
  * refresh_learner_analysis(AGENTS §5 / HLD §9.4):
  * 按学科分批(≤10 道)调文本模型 → 每题短事务幂等落库 + 确定性重算
@@ -131,7 +133,7 @@ async function analyzeBatch(
   batch: PendingMistake[],
 ): Promise<void> {
   const { db, chat, logger } = ctx;
-  const prompt = promptFor("analyze_mistake");
+  const prompt = promptForAnalyze(subject);
 
   const items: AnalysisPayload[] = batch.map((m, idx) => {
     const content = JSON.parse(m.contentJson) as {
@@ -140,6 +142,7 @@ async function analyzeBatch(
       myAnswer?: string;
       correctAnswer?: string;
       note?: string;
+      doubaoHints?: string[];
     };
     return {
       index: idx,
@@ -149,6 +152,7 @@ async function analyzeBatch(
       correctAnswer: content.correctAnswer,
       note: content.note,
       gradeAtTime: m.gradeAtTime,
+      doubaoHints: content.doubaoHints?.slice(0, 5),
     };
   });
 
@@ -156,7 +160,16 @@ async function analyzeBatch(
     taskType: "analyze_mistake",
     system: prompt.system,
     messages: [
-      { role: "user", content: prompt.buildUser({ subject, items, currentGrade: null }) },
+      {
+        role: "user",
+        content: prompt.buildUser({
+          subject,
+          items,
+          currentGrade: null,
+          // 两级标签反馈闭环:把该生该学科已有分类喂给模型,要求优先复用
+          knownCategories: listCategoriesForSubject(db, job.userId, subject),
+        }),
+      },
     ],
     jsonMode: true,
     jobId: job.id,
@@ -262,6 +275,7 @@ function writeAnalysis(
         c.name,
         mistake.id,
         c.confidence,
+        c.category ?? null, // 两级标签:分析产出分类;已有分类的概念不被覆盖(concepts.ts 防抖)
       );
       affectedConceptIds.push(conceptId);
       const inserted = tx
@@ -369,7 +383,7 @@ async function summarizeSubject(
   scope: Subject,
 ): Promise<void> {
   const { db, chat, logger } = ctx;
-  const prompt = promptFor("summarize_learner");
+  const prompt = promptForSummarize(scope);
   const previous = db
     .select()
     .from(learnerSummaries)

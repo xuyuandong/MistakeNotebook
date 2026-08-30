@@ -8,6 +8,8 @@ export interface AnalyzeBatchItem {
   correctAnswer?: string;
   note?: string;
   gradeAtTime?: string | null;
+  /** 豆包识题时的建议知识点标签(doubao-template@7):仅作参考,不直接建概念 */
+  doubaoHints?: string[];
   /** 相关历史错题精简片段(检索结果,LLD §6.3) */
   relatedMistakes?: string[];
   /** 相关概念的掌握状态摘要 */
@@ -21,6 +23,8 @@ export interface AnalyzeBatchItem {
 export interface AnalyzeBatchInput {
   subject: "chinese" | "math" | "english";
   currentGrade?: string | null;
+  /** 该生该学科已有概念分类(两级标签反馈闭环):提示词要求优先复用 */
+  knownCategories?: string[];
   items: AnalyzeBatchItem[];
 }
 
@@ -31,6 +35,12 @@ export interface AnalyzeBatchInput {
  */
 export function buildAnalyzeUser(input: AnalyzeBatchInput): string {
   const parts: string[] = [`学科:${input.subject}`, gradeLabel(input.currentGrade)];
+  if (input.knownCategories?.length) {
+    parts.push(
+      "已有概念分类(概念的 category 必须优先从这里选择,确实没有合适的才新建):",
+      ...input.knownCategories.map((c) => `- ${truncateForBudget(c, 50)}`),
+    );
+  }
   for (const item of input.items) {
     if (item.profileSummary?.length) {
       parts.push("学生画像摘要:", ...item.profileSummary.map((s) => `- ${truncateForBudget(s, 300)}`));
@@ -46,6 +56,9 @@ export function buildAnalyzeUser(input: AnalyzeBatchInput): string {
       item.myAnswer ? `学生答案:${item.myAnswer}` : "学生答案:(未提供,视为完全不会)",
       item.correctAnswer ? `正确答案:${item.correctAnswer}` : "正确答案:(未提供)",
       item.note ? `学生备注:${item.note}` : "",
+      item.doubaoHints?.length
+        ? `录入时初筛标签(豆包建议,仅供参考):${item.doubaoHints.slice(0, 5).join("、")}`
+        : "",
       item.gradeAtTime ? `录入时年级:${item.gradeAtTime}` : "",
     ];
     if (item.relatedMastery?.length) {

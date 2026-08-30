@@ -127,6 +127,8 @@ export function importDoubaoJson(db: Db, userId: string, text: string): ImportRe
             explanation: item.explanation,
             myAnswer: item.myAnswer,
             note: item.note,
+            // 豆包建议标签(doubao-template@7):仅作 AI 分析参考,不直接建概念
+            doubaoHints: item.suggestedConcepts.length ? item.suggestedConcepts : undefined,
           }),
           rawJson: JSON.stringify(original),
           createdAt: now,

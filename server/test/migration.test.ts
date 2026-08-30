@@ -31,6 +31,7 @@ describe("迁移", () => {
       "import_batches",
       "ingestion_drafts",
       "concepts",
+      "concept_categories",
       "concept_aliases",
       "mistake_concepts",
       "review_schedules",
@@ -99,12 +100,93 @@ describe("迁移", () => {
     sqlite.pragma("foreign_keys = ON");
 
     const applied = runMigrations(sqlite, MIGRATIONS_DIR);
-    expect(applied).toEqual(["0007_review_intervals.sql", "0008_revival_toggle.sql"]);
+    expect(applied).toEqual([
+      "0007_review_intervals.sql",
+      "0008_revival_toggle.sql",
+      "0009_concept_categories.sql",
+      "0010_consolidate_model_runs.sql",
+    ]);
     const cols = (
       sqlite.prepare("PRAGMA table_info(users)").all() as { name: string }[]
     ).map((c) => c.name);
     expect(cols).toContain("review_intervals_json");
     expect(cols).toContain("revival_enabled");
+  });
+
+  test("v0.6:concept_categories 表与 category_id 列存在", () => {
+    const sqlite = freshDb();
+    runMigrations(sqlite, MIGRATIONS_DIR);
+    const conceptCols = (
+      sqlite.prepare("PRAGMA table_info(concepts)").all() as { name: string }[]
+    ).map((c) => c.name);
+    expect(conceptCols).toContain("category_id");
+    const catCols = (
+      sqlite.prepare("PRAGMA table_info(concept_categories)").all() as { name: string }[]
+    ).map((c) => c.name);
+    for (const col of ["id", "user_id", "subject", "canonical_name", "status", "merged_into_id"]) {
+      expect(catCols).toContain(col);
+    }
+  });
+
+  test("v0.6:model_runs 接受 consolidate_concepts 并继续拒绝未知任务", () => {
+    const sqlite = freshDb();
+    runMigrations(sqlite, MIGRATIONS_DIR);
+    const insert = sqlite.prepare(
+      `INSERT INTO model_runs
+       (id, task_type, provider, model, prompt_version, status, duration_ms, created_at)
+       VALUES (?, ?, 'mock', 'mock', 'consolidate@1', 'ok', 1, '2026-08-30T00:00:00Z')`,
+    );
+    expect(() => insert.run("run-ok", "consolidate_concepts")).not.toThrow();
+    expect(() => insert.run("run-bad", "unknown_task")).toThrow(/CHECK/);
+  });
+
+  test("v0.6 回填:冒号前缀概念自动拆出分类,无前缀概念保持未分类", () => {
+    const sqlite = freshDb();
+    // 模拟旧库:先应用 0001~0008,写入待回填的概念,再升级应用 0009
+    const files = readdirSync(MIGRATIONS_DIR).filter((f) => f.endsWith(".sql")).sort();
+    const older = files.filter((f) => f < "0009_concept_categories.sql");
+    sqlite.exec("CREATE TABLE _migrations (id TEXT PRIMARY KEY, applied_at TEXT NOT NULL)");
+    for (const f of older) {
+      sqlite.exec(readFileSync(join(MIGRATIONS_DIR, f), "utf8"));
+      sqlite
+        .prepare("INSERT INTO _migrations (id, applied_at) VALUES (?, ?)")
+        .run(f, new Date().toISOString());
+    }
+    const now = "2026-08-30T00:00:00Z";
+    const insertConcept = sqlite.prepare(
+      `INSERT INTO concepts (id, user_id, subject, canonical_name, status, created_at, updated_at)
+       VALUES (?, 'u_local', 'english', ?, 'active', ?, ?)`,
+    );
+    insertConcept.run("c1", "固定搭配：keep cool", now, now);
+    insertConcept.run("c2", "固定搭配：hunt other animals", now, now);
+    insertConcept.run("c3", "词汇辨析:forest/woods", now, now); // 半角冒号同样拆分
+    insertConcept.run("c4", "去分母", now, now); // 无前缀 → 未分类
+    insertConcept.run("c5", "：开头是分隔符", now, now); // 前缀为空 → 不拆
+
+    expect(runMigrations(sqlite, MIGRATIONS_DIR)).toEqual([
+      "0009_concept_categories.sql",
+      "0010_consolidate_model_runs.sql",
+    ]);
+
+    const cats = sqlite
+      .prepare("SELECT id, canonical_name FROM concept_categories ORDER BY canonical_name")
+      .all() as { id: string; canonical_name: string }[];
+    expect(cats.map((c) => c.canonical_name)).toEqual(["固定搭配", "词汇辨析"]);
+
+    const catOf = (id: string) =>
+      (
+        sqlite
+          .prepare(
+            `SELECT k.canonical_name AS name FROM concepts c
+             JOIN concept_categories k ON k.id = c.category_id WHERE c.id = ?`,
+          )
+          .get(id) as { name: string } | undefined
+      )?.name;
+    expect(catOf("c1")).toBe("固定搭配");
+    expect(catOf("c2")).toBe("固定搭配"); // 同分类只有一个条目(去重)
+    expect(catOf("c3")).toBe("词汇辨析");
+    expect(catOf("c4")).toBeUndefined();
+    expect(catOf("c5")).toBeUndefined();
   });
 
   test("v0.5:revival_enabled 默认 0(复活开关默认关闭)", () => {

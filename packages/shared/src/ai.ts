@@ -2,20 +2,48 @@ import { z } from "zod";
 import { ErrorType, Subject } from "./enums.js";
 
 /**
- * analyze_mistake(analyze@4):文本模型输出。
+ * analyze_mistake(analyze@6):文本模型输出。
  * AI 结合学生画像主动归因:技术性错误类型 + 学习方法/习惯 + 三层建议;
  * 完全无依据才输出 unconfirmed(AGENTS §7)。
  */
 export const ConceptCandidate = z.object({
   name: z.string().min(1).max(100),
+  /** 所属知识分类(两级标签,analyze@6):优先复用输入提供的已有分类;缺省 = 未分类 */
+  category: z.string().trim().max(50).nullish(),
   isPrimary: z.boolean().default(false),
   evidence: z.string().max(1000).nullish(),
   /** 模型漏报时按中等置信度处理(统计字段宽容;名称/证据等内容字段仍严格) */
   confidence: z.number().min(0).max(1).default(0.5),
-  /** 模型认为相似的既有概念 ID(服务端再做别名/FTS 匹配) */
-  similarConceptIds: z.array(z.string()).max(5).default([]),
 });
 export type ConceptCandidate = z.infer<typeof ConceptCandidate>;
+
+/**
+ * consolidate_concepts(consolidate@1):概念归并建议(一次性整理工具,终端逐条确认)。
+ * assignments 把概念改挂分类(可新建分类);merges 把旧概念合并进目标概念(保留合并历史)。
+ */
+export const ConsolidateProposals = z.object({
+  assignments: z
+    .array(
+      z.object({
+        conceptId: z.string().min(1),
+        category: z.string().trim().min(1).max(50),
+        reason: z.string().max(200).default(""),
+      }),
+    )
+    .max(200)
+    .default([]),
+  merges: z
+    .array(
+      z.object({
+        fromId: z.string().min(1),
+        intoId: z.string().min(1),
+        reason: z.string().max(200).default(""),
+      }),
+    )
+    .max(100)
+    .default([]),
+});
+export type ConsolidateProposals = z.infer<typeof ConsolidateProposals>;
 
 export const AnalyzeMistakeResult = z.object({
   primaryErrorType: ErrorType,

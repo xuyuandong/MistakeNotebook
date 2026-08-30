@@ -1,14 +1,162 @@
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
-import { concepts, conceptAliases, mastery, mistakeConcepts } from "../db/schema.js";
+import {
+  conceptAliases,
+  conceptCategories,
+  concepts,
+  generatedQuestions,
+  mastery,
+  mistakeConcepts,
+} from "../db/schema.js";
 import type { Db } from "../db/client.js";
 import type { Subject } from "@mistake-book/shared";
+import { recomputeMasteryForConcept } from "./mastery.js";
 
 /**
  * 数据驱动的知识概念(HLD §9.9):
  * 先精确匹配规范名/别名,高置信命中已有概念;否则创建新概念。
  * 只在真实错题/作答证据出现时建立,不预置知识树。
  */
+
+const nowIso = () => new Date().toISOString();
+
+/**
+ * 两级标签(用户 2026-08-30 决策):概念分类是元信息层,按学科维护受控词表。
+ * 分析提示词会收到已有分类列表并要求优先复用;此处只做精确名匹配,无则创建。
+ * 合并过的分类按 merged_into_id 追溯到目标,保证旧名称引用不悬空。
+ */
+export function resolveCategory(
+  db: Db,
+  userId: string,
+  subject: Subject,
+  name: string,
+): string {
+  const normalized = name.trim().slice(0, 50);
+  if (!normalized) throw new Error("分类名不能为空");
+  const existing = db
+    .select()
+    .from(conceptCategories)
+    .where(
+      and(
+        eq(conceptCategories.userId, userId),
+        eq(conceptCategories.subject, subject),
+        eq(conceptCategories.canonicalName, normalized),
+      ),
+    )
+    .get();
+  if (existing) {
+    if (existing.status === "merged" && existing.mergedIntoId) {
+      let targetId = existing.mergedIntoId;
+      const seen = new Set([existing.id]);
+      while (!seen.has(targetId)) {
+        seen.add(targetId);
+        const target = db
+          .select()
+          .from(conceptCategories)
+          .where(and(eq(conceptCategories.id, targetId), eq(conceptCategories.userId, userId)))
+          .get();
+        if (!target || target.status === "active" || !target.mergedIntoId) return targetId;
+        targetId = target.mergedIntoId;
+      }
+      throw new Error("分类合并历史存在循环");
+    }
+    return existing.id;
+  }
+  const id = randomUUID();
+  const now = nowIso();
+  db.insert(conceptCategories)
+    .values({ id, userId, subject, canonicalName: normalized, createdAt: now, updatedAt: now })
+    .onConflictDoNothing()
+    .run();
+  const created = db
+    .select()
+    .from(conceptCategories)
+    .where(
+      and(
+        eq(conceptCategories.userId, userId),
+        eq(conceptCategories.subject, subject),
+        eq(conceptCategories.canonicalName, normalized),
+      ),
+    )
+    .get();
+  if (!created) throw new Error("分类创建失败");
+  return created.id;
+}
+
+/** 学科已有分类(active),提示词反馈闭环用;按名字排序保证输出稳定 */
+export function listCategoriesForSubject(
+  db: Db,
+  userId: string,
+  subject: Subject,
+  limit = 80,
+): string[] {
+  return db
+    .select()
+    .from(conceptCategories)
+    .all()
+    .filter(
+      (c) => c.userId === userId && c.subject === subject && c.status === "active",
+    )
+    .map((c) => c.canonicalName)
+    .sort((a, b) => a.localeCompare(b, "zh-Hans-CN"))
+    .slice(0, limit);
+}
+
+/** 把概念改挂分类(拆分/重组用):直接覆盖;categoryName 为空视作清除 */
+export function assignCategory(
+  db: Db,
+  userId: string,
+  conceptId: string,
+  categoryName: string | null,
+): void {
+  const concept = db
+    .select()
+    .from(concepts)
+    .where(and(eq(concepts.id, conceptId), eq(concepts.userId, userId)))
+    .get();
+  if (!concept) throw new Error("概念不存在");
+  const categoryId = categoryName?.trim() ? resolveCategory(db, userId, concept.subject as Subject, categoryName) : null;
+  db.update(concepts)
+    .set({ categoryId, updatedAt: nowIso() })
+    .where(eq(concepts.id, conceptId))
+    .run();
+}
+
+/** 合并分类:成员概念整体改挂目标分类,旧分类置 merged(保留合并历史,不物理删除) */
+export function mergeCategories(
+  db: Db,
+  userId: string,
+  fromId: string,
+  intoId: string,
+): void {
+  if (fromId === intoId) throw new Error("不能合并到自身");
+  db.transaction((tx) => {
+    const from = tx
+      .select()
+      .from(conceptCategories)
+      .where(and(eq(conceptCategories.id, fromId), eq(conceptCategories.userId, userId)))
+      .get();
+    const target = tx
+      .select()
+      .from(conceptCategories)
+      .where(and(eq(conceptCategories.id, intoId), eq(conceptCategories.userId, userId)))
+      .get();
+    if (!from || !target) throw new Error("分类不存在");
+    if (from.subject !== target.subject) throw new Error("跨学科分类不能合并");
+    if (from.status !== "active" || target.status !== "active") {
+      throw new Error("只能合并 active 分类");
+    }
+    tx.update(concepts)
+      .set({ categoryId: intoId, updatedAt: nowIso() })
+      .where(and(eq(concepts.userId, userId), eq(concepts.categoryId, fromId)))
+      .run();
+    tx.update(conceptCategories)
+      .set({ status: "merged", mergedIntoId: intoId, updatedAt: nowIso() })
+      .where(eq(conceptCategories.id, fromId))
+      .run();
+  });
+}
+
 export function resolveOrCreateConcept(
   db: Db,
   userId: string,
@@ -16,9 +164,20 @@ export function resolveOrCreateConcept(
   name: string,
   discoveredFromMistakeId?: string,
   confidence = 0.5,
+  /** 两级标签:模型建议的分类;已有分类的概念不被覆盖(防抖动) */
+  category?: string | null,
 ): string {
   const normalized = name.trim().slice(0, 100);
   if (!normalized) throw new Error("概念名不能为空");
+
+  /** 命中已有概念时:无分类才填入模型建议的分类,已有分类保持不变 */
+  const fillCategory = (conceptId: string, currentCategoryId: string | null | undefined) => {
+    if (!category?.trim() || currentCategoryId) return;
+    db.update(concepts)
+      .set({ categoryId: resolveCategory(db, userId, subject, category), updatedAt: nowIso() })
+      .where(eq(concepts.id, conceptId))
+      .run();
+  };
 
   const byName = db
     .select()
@@ -31,7 +190,10 @@ export function resolveOrCreateConcept(
       ),
     )
     .get();
-  if (byName) return byName.id;
+  if (byName) {
+    fillCategory(byName.id, byName.categoryId);
+    return byName.id;
+  }
 
   const alias = db
     .select()
@@ -44,39 +206,47 @@ export function resolveOrCreateConcept(
       .from(concepts)
       .where(and(eq(concepts.id, alias.conceptId), eq(concepts.userId, userId)))
       .get();
-    if (target && target.status === "active") return target.id;
+    if (target && target.status === "active") {
+      if (target.subject !== subject) return createConcept();
+      fillCategory(target.id, target.categoryId);
+      return target.id;
+    }
   }
 
-  const id = randomUUID();
-  const now = new Date().toISOString();
-  db.insert(concepts)
-    .values({
-      id,
-      userId,
-      subject,
-      canonicalName: normalized,
-      status: "active",
-      discoveredFromMistakeId: discoveredFromMistakeId ?? null,
-      createdAt: now,
-      updatedAt: now,
-    })
-    .onConflictDoNothing()
-    .run();
-  // 并发/重复创建时取回已有行
-  const created = db
-    .select()
-    .from(concepts)
-    .where(
-      and(
-        eq(concepts.userId, userId),
-        eq(concepts.subject, subject),
-        eq(concepts.canonicalName, normalized),
-      ),
-    )
-    .get();
+  function createConcept(): string {
+    const id = randomUUID();
+    const now = nowIso();
+    db.insert(concepts)
+      .values({
+        id,
+        userId,
+        subject,
+        canonicalName: normalized,
+        categoryId: category?.trim() ? resolveCategory(db, userId, subject, category) : null,
+        status: "active",
+        discoveredFromMistakeId: discoveredFromMistakeId ?? null,
+        createdAt: now,
+        updatedAt: now,
+      })
+      .onConflictDoNothing()
+      .run();
+    const created = db
+      .select()
+      .from(concepts)
+      .where(
+        and(
+          eq(concepts.userId, userId),
+          eq(concepts.subject, subject),
+          eq(concepts.canonicalName, normalized),
+        ),
+      )
+      .get();
+    if (!created) throw new Error("概念创建失败");
+    return created.id;
+  }
+
   void confidence;
-  if (!created) throw new Error("概念创建失败");
-  return created.id;
+  return createConcept();
 }
 
 /** 概念改名;同时把旧名记为别名,保留历史(PRD 5.2.3) */
@@ -125,6 +295,10 @@ export function mergeConcepts(db: Db, userId: string, oldId: string, targetId: s
       .where(and(eq(concepts.id, targetId), eq(concepts.userId, userId)))
       .get();
     if (!old || !target) throw new Error("概念不存在");
+    if (old.subject !== target.subject) throw new Error("跨学科概念不能合并");
+    if (old.status !== "active" || target.status !== "active") {
+      throw new Error("只能合并 active 概念");
+    }
 
     tx.insert(conceptAliases)
       .values({
@@ -166,15 +340,34 @@ export function mergeConcepts(db: Db, userId: string, oldId: string, targetId: s
       }
     }
 
-    tx.run(
-      sql`UPDATE mastery SET concept_id = ${targetId} WHERE concept_id = ${oldId} AND user_id = ${userId}`,
-    );
-    // 同目标概念可能已有一行,去重合并
-    tx.run(
-      sql`DELETE FROM mastery WHERE concept_id = ${targetId} AND user_id = ${userId} AND id NOT IN (
-            SELECT id FROM mastery WHERE concept_id = ${targetId} AND user_id = ${userId} ORDER BY updated_at DESC LIMIT 1
-          )`,
-    );
+    // 生成题关联以 JSON 保存概念 ID;合并时同样替换并去重,否则后续掌握度重建会漏掉历史作答。
+    const generated = tx
+      .select()
+      .from(generatedQuestions)
+      .where(eq(generatedQuestions.userId, userId))
+      .all();
+    for (const question of generated) {
+      const ids = question.conceptIdsJson
+        ? (JSON.parse(question.conceptIdsJson) as string[])
+        : [];
+      if (!ids.includes(oldId)) continue;
+      tx.update(generatedQuestions)
+        .set({ conceptIdsJson: JSON.stringify([...new Set(ids.map((id) => id === oldId ? targetId : id))]) })
+        .where(eq(generatedQuestions.id, question.id))
+        .run();
+    }
+
+    // 掌握度是确定性派生数据:删掉 old/target 旧值,基于迁移后的事实关联重算,
+    // 避免直接 UPDATE 触发 UNIQUE(user_id, concept_id) 冲突或错误合并样本。
+    tx.delete(mastery)
+      .where(
+        and(
+          eq(mastery.userId, userId),
+          inArray(mastery.conceptId, [oldId, targetId]),
+        ),
+      )
+      .run();
+    recomputeMasteryForConcept(tx as unknown as Db, userId, targetId);
 
     tx.update(concepts)
       .set({ status: "merged", mergedIntoId: targetId, updatedAt: new Date().toISOString() })

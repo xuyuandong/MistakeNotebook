@@ -55,6 +55,8 @@ interface DraftResult {
   explanation?: string | null;
   myAnswer?: string | null;
   note?: string | null;
+  /** 豆包建议知识点标签(doubao-template@7):随保存进 content,分析时作参考 */
+  doubaoHints?: string[];
 }
 
 interface QuestionForm {
@@ -67,6 +69,7 @@ interface QuestionForm {
   explanation: string;
   myAnswer: string;
   note: string;
+  doubaoHints: string[];
   rawJson: string;
   saved: boolean;
 }
@@ -122,6 +125,7 @@ export function CapturePage() {
           explanation: "",
           myAnswer: "",
           note: "",
+          doubaoHints: [],
           rawJson: "",
           saved: false,
         })),
@@ -143,6 +147,7 @@ export function CapturePage() {
             explanation: r?.explanation ?? "",
             myAnswer: r?.myAnswer ?? "",
             note: r?.note ?? "",
+            doubaoHints: r?.doubaoHints ?? [],
             rawJson: d?.rawJson ?? "",
           };
         }),
@@ -186,6 +191,7 @@ export function CapturePage() {
           ...(q.explanation ? { explanationMd: q.explanation } : {}),
           ...(q.myAnswer ? { myAnswer: q.myAnswer } : {}),
           ...(q.note ? { note: q.note } : {}),
+          ...(q.doubaoHints.length ? { doubaoHints: q.doubaoHints } : {}),
         },
       },
     });

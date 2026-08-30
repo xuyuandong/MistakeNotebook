@@ -8,14 +8,14 @@
 
 ```markdown
 ---
-id: analyze_mistake
-version: analyze@4
+id: analyze_mistake_math
+version: analyze@6
 ---
 你是学生错题本的…
 ```
 
-- `id` 必须与文件名一致;服务端任务提示词的 `id` 对应 `TaskType`(共 6 个:`analyze_mistake` / `generate_questions` / `verify_question` / `judge_answer` / `select_topics` / `summarize_learner`)。`doubao_extract.md` 是豆包识题模板,服务端不加载。
-- `version` 会记录到 `model_runs.prompt_version`,用于回归对比。**修改正文语义必须递增版本号**(如 `analyze@4` → `analyze@5`)。
+- `id` 必须与文件名一致;`analyze_mistake` 与 `summarize_learner` 按学科拆分为 3 份,id 带学科后缀(`analyze_mistake_math` / `analyze_mistake_chinese` / `analyze_mistake_english`,`summarize_learner_*` 同理);其余服务端任务提示词的 `id` 对应 `TaskType`(`generate_questions` / `verify_question` / `judge_answer` / `select_topics` / `consolidate_concepts`)。`doubao_extract.md` 是豆包识题模板,服务端不加载。
+- `version` 会记录到 `model_runs.prompt_version`,用于回归对比。**修改正文语义必须递增版本号**。同一任务按学科拆分的三份文件共用同一版本号(如三份 `analyze_mistake_*` 都是 `analyze@6`),保证跨学科可比;改学科专属要点只递增该任务版本即可,但三份文件要同步检查通用规则是否仍然一致。
 - 正文中的 `{{TOKEN}}` 占位符在加载时由代码注入当前枚举值(如 `{{ERROR_TYPE_LIST}}` = 错误类型枚举列表),避免枚举改动后提示词过期;加载时发现未识别的 `{{...}}` 会直接启动失败。
 - 正文即发送给模型的 system 全文,不要加代码块围栏或额外说明。
 
