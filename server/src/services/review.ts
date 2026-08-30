@@ -1,4 +1,4 @@
-import { and, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import {
   attempts,
@@ -14,7 +14,9 @@ import {
 import type { Db } from "../db/client.js";
 import {
   DEFAULT_REVIEW_INTERVALS,
+  GRADUATION_STREAK,
   isFigureDependent,
+  REVIVAL_INTERVAL_INDEX,
   REVIEW_INTERVAL_DAYS,
   type AttemptResult,
   type Subject,
@@ -221,13 +223,15 @@ export function reviewIntervalsFor(db: Db, userId: string, subject: string): num
 }
 
 /** 推进复习计划(PRD 6.3):答对进下一档(封顶);部分/错误/放弃原地不倒退,避免挫败感。
- *  下次到期 = 实际完成日 + 当前档间隔(晚复习只顺延,不丢题)。 */
+ *  下次到期 = 实际完成日 + 当前档间隔(晚复习只顺延,不丢题)。
+ *  毕业:本次答对后尾部连续正确达 GRADUATION_STREAK → 未完成排期置 done,不再生成下一档;
+ *  毕业不是新状态值,可由作答事实源重算(尾部连续正确 + 无 scheduled 排期)。 */
 function advanceReviewSchedule(
   db: Db,
   userId: string,
   mistakeId: string,
   result: AttemptResult,
-): string | null {
+): { nextDueDate: string | null; graduated: boolean } {
   const current = db
     .select()
     .from(reviewSchedules)
@@ -240,11 +244,27 @@ function advanceReviewSchedule(
     )
     .all()
     .sort((a, b) => a.dueDate.localeCompare(b.dueDate))[0];
-  if (!current) return null;
+  if (!current) return { nextDueDate: null, graduated: false };
   const subject =
     db.select({ subject: mistakes.subject }).from(mistakes).where(eq(mistakes.id, mistakeId)).get()
       ?.subject ?? "math";
   const intervals = reviewIntervalsFor(db, userId, subject);
+
+  if (result === "correct" && trailingCorrectStreak(db, userId, mistakeId) >= GRADUATION_STREAK) {
+    const now = new Date().toISOString();
+    db.update(reviewSchedules)
+      .set({ status: "done", completedAt: now })
+      .where(
+        and(
+          eq(reviewSchedules.userId, userId),
+          eq(reviewSchedules.mistakeId, mistakeId),
+          eq(reviewSchedules.status, "scheduled"),
+        ),
+      )
+      .run();
+    return { nextDueDate: null, graduated: true };
+  }
+
   const nextIndex =
     result === "correct"
       ? Math.min(current.intervalIndex + 1, intervals.length - 1)
@@ -266,7 +286,104 @@ function advanceReviewSchedule(
       createdAt: now,
     })
     .run();
-  return dueDate;
+  return { nextDueDate: dueDate, graduated: false };
+}
+
+/** 尾部连续答对次数(作答事实源推导,确定性):主观题 pending_judge 不计,
+ *  部分正确/答错/放弃打断连续。含练习页对同一错题的作答(同为 mistake_review 事实)。
+ *  排序用 created_at DESC + rowid DESC 双键:同毫秒作答按插入序,结果与查询计划无关。 */
+export function trailingCorrectStreak(db: Db, userId: string, mistakeId: string): number {
+  const timed = db
+    .select({ result: attempts.result })
+    .from(attempts)
+    .where(
+      and(
+        eq(attempts.userId, userId),
+        eq(attempts.sourceType, "mistake_review"),
+        eq(attempts.sourceId, mistakeId),
+      ),
+    )
+    .orderBy(desc(attempts.createdAt), sql`rowid DESC`)
+    .all()
+    .filter((a) => a.result !== "pending_judge");
+  let streak = 0;
+  for (const a of timed) {
+    if (a.result !== "correct") break;
+    streak += 1;
+  }
+  return streak;
+}
+
+/**
+ * 概念重逢复活(PRD 6.3):AI 分析把新错题关联到概念 C 时,C 下已毕业旧题
+ * (无 scheduled 排期且尾部连续答对达阈值、未归档)按第 2 档重新排期——
+ * 比新错题(第 1 档)缓、比维护末档急;复活后答对一次即再次毕业(旧连续次数仍在尾部),
+ * 答错/部分正确则回到常规节奏。幂等:已有排期的题跳过,重试不重复排期。
+ * 受 users.revival_enabled 开关控制(默认关闭,观察期);需在与概念关联写入同一个事务内调用。
+ */
+export function reviveGraduatedForConcept(db: Db, userId: string, conceptId: string): number {
+  const enabled = db
+    .select({ v: users.revivalEnabled })
+    .from(users)
+    .where(eq(users.id, userId))
+    .get()?.v;
+  if (!enabled) return 0;
+
+  const now = new Date().toISOString();
+  const today = localDate();
+  const mistakeIds = [
+    ...new Set(
+      db
+        .select({ mistakeId: mistakeConcepts.mistakeId, conceptId: mistakeConcepts.conceptId })
+        .from(mistakeConcepts)
+        .all()
+        .filter((r) => r.conceptId === conceptId)
+        .map((r) => r.mistakeId),
+    ),
+  ];
+  let revived = 0;
+  for (const mistakeId of mistakeIds) {
+    const m = db
+      .select()
+      .from(mistakes)
+      .where(
+        and(
+          eq(mistakes.id, mistakeId),
+          eq(mistakes.userId, userId),
+          eq(mistakes.archived, 0),
+        ),
+      )
+      .get();
+    if (!m) continue;
+    const hasScheduled = db
+      .select({ id: reviewSchedules.id })
+      .from(reviewSchedules)
+      .where(
+        and(
+          eq(reviewSchedules.userId, userId),
+          eq(reviewSchedules.mistakeId, mistakeId),
+          eq(reviewSchedules.status, "scheduled"),
+        ),
+      )
+      .get();
+    if (hasScheduled) continue;
+    if (trailingCorrectStreak(db, userId, mistakeId) < GRADUATION_STREAK) continue;
+    const intervals = reviewIntervalsFor(db, userId, m.subject);
+    const idx = Math.min(REVIVAL_INTERVAL_INDEX, intervals.length - 1);
+    db.insert(reviewSchedules)
+      .values({
+        id: randomUUID(),
+        userId,
+        mistakeId,
+        status: "scheduled",
+        dueDate: addDays(today, intervals[idx]),
+        intervalIndex: idx,
+        createdAt: now,
+      })
+      .run();
+    revived += 1;
+  }
+  return revived;
 }
 
 function conceptIdsFor(db: Db, userId: string, sourceType: string, sourceId: string): string[] {
@@ -302,6 +419,8 @@ export interface SubmitAttemptResult {
   result?: AttemptResult;
   masteryDelta?: number | null;
   nextReviewDate?: string | null;
+  /** 本次作答使错题毕业(连续答对达阈值),不再安排复习 */
+  graduated?: boolean;
 }
 
 /**
@@ -383,12 +502,19 @@ export function submitAttempt(
     return { attemptId, judging };
   }
 
-  const nextReviewDate =
+  const advance =
     input.sourceType === "mistake_review"
       ? advanceReviewSchedule(db, userId, input.sourceId, result)
       : null;
   const masteryDelta = recomputeMastery(db, userId, input.sourceType, input.sourceId);
-  return { attemptId, judging, result, masteryDelta, nextReviewDate };
+  return {
+    attemptId,
+    judging,
+    result,
+    masteryDelta,
+    nextReviewDate: advance?.nextDueDate ?? null,
+    graduated: advance?.graduated === true ? true : undefined,
+  };
 }
 
 /**
@@ -402,7 +528,7 @@ export function finalizePendingAttempt(
   result: Exclude<AttemptResult, "pending_judge">,
   judgedBy: "llm" | "user_appeal",
   feedback: { basis: string; comment: string } | null,
-): { attemptId: string; result: AttemptResult; nextReviewDate: string | null; masteryDelta: number | null } | null {
+): { attemptId: string; result: AttemptResult; nextReviewDate: string | null; masteryDelta: number | null; graduated?: boolean } | null {
   const attempt = db.select().from(attempts).where(eq(attempts.id, attemptId)).get();
   if (!attempt || attempt.userId !== userId) return null;
   if (attempt.result !== "pending_judge") return null; // 已终态(重试/申诉竞态)
@@ -438,12 +564,18 @@ export function finalizePendingAttempt(
       .run();
   });
 
-  const nextReviewDate =
+  const advance =
     attempt.sourceType === "mistake_review"
       ? advanceReviewSchedule(db, userId, attempt.sourceId, result)
       : null;
   const masteryDelta = recomputeMastery(db, userId, attempt.sourceType, attempt.sourceId);
-  return { attemptId, result, nextReviewDate, masteryDelta };
+  return {
+    attemptId,
+    result,
+    nextReviewDate: advance?.nextDueDate ?? null,
+    masteryDelta,
+    graduated: advance?.graduated === true ? true : undefined,
+  };
 }
 
 function resolveSubject(
@@ -507,7 +639,7 @@ export function appealAttempt(
   return { attemptId, result, masteryDelta };
 }
 
-/** 作答详情(轮询判分结果) */
+/** 作答详情(轮询判分结果)。graduated:该错题已毕业(供前端展示,LLM 判分路径无同步返回值) */
 export function attemptDetail(
   db: Db,
   userId: string,
@@ -516,6 +648,7 @@ export function attemptDetail(
   attemptId: string;
   result: AttemptResult;
   feedback: { basis: string; comment: string } | null;
+  graduated?: boolean;
 } | null {
   const attempt = db.select().from(attempts).where(eq(attempts.id, attemptId)).get();
   if (!attempt || attempt.userId !== userId) return null;
@@ -530,7 +663,31 @@ export function attemptDetail(
       feedback = null;
     }
   }
-  return { attemptId: attempt.id, result: attempt.result as AttemptResult, feedback };
+  const graduated =
+    attempt.sourceType === "mistake_review" && isGraduated(db, userId, attempt.sourceId);
+  return {
+    attemptId: attempt.id,
+    result: attempt.result as AttemptResult,
+    feedback,
+    graduated: graduated || undefined,
+  };
+}
+
+/** 毕业判定(确定性派生):无未完成排期且尾部连续答对达阈值 */
+export function isGraduated(db: Db, userId: string, mistakeId: string): boolean {
+  const scheduled = db
+    .select({ id: reviewSchedules.id })
+    .from(reviewSchedules)
+    .where(
+      and(
+        eq(reviewSchedules.userId, userId),
+        eq(reviewSchedules.mistakeId, mistakeId),
+        eq(reviewSchedules.status, "scheduled"),
+      ),
+    )
+    .get();
+  if (scheduled) return false;
+  return trailingCorrectStreak(db, userId, mistakeId) >= GRADUATION_STREAK;
 }
 
 /** 本周复习统计(学习分析用,纯查询;依赖图形的错题不参与,与到期列表口径一致) */

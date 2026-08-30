@@ -11,7 +11,6 @@ import {
   Progress,
   Radio,
   SegmentedControl,
-  Select,
   Stack,
   Text,
   Textarea,
@@ -23,7 +22,7 @@ import {
   IconSparkles,
   IconCircleCheck,
 } from "@tabler/icons-react";
-import { Subjects } from "@mistake-book/shared";
+import { Subjects, GRADUATION_STREAK } from "@mistake-book/shared";
 import { api } from "../lib/api";
 import { MathText } from "../components/MathText";
 import { PageHeader } from "../components/PageHeader";
@@ -73,6 +72,13 @@ interface AttemptResult {
   result?: string;
   masteryDelta?: number | null;
   nextReviewDate?: string | null;
+  graduated?: boolean;
+}
+
+/** 毕业提示(PRD 6.3):连续答对达阈值后不再安排复习。
+ *  不承诺"旧题自动回来"——概念重逢复活是设置页开关(默认关闭)。 */
+function graduationNotice(): string {
+  return `🎉 连续 ${GRADUATION_STREAK} 次答对,这道错题已毕业,不再安排复习`;
 }
 
 /**
@@ -194,6 +200,7 @@ export function PracticePage() {
           parts.push(res.masteryDelta === 0 ? "掌握度无变化" : `掌握度 ${res.masteryDelta > 0 ? "+" : ""}${res.masteryDelta}`);
         }
         if (res.nextReviewDate) parts.push(`下次复习 ${res.nextReviewDate}`);
+        if (res.graduated) parts.push(graduationNotice());
         setFeedback(parts.join(" · "));
         setRevealed(true);
       }
@@ -218,7 +225,7 @@ export function PracticePage() {
       await new Promise((r) => setTimeout(r, 1500));
       setWaitSec(Math.round((Date.now() - started) / 1000));
       try {
-        const d = await api<{ result: string; feedback: { basis: string; comment: string } | null }>(
+        const d = await api<{ result: string; feedback: { basis: string; comment: string } | null; graduated?: boolean }>(
           `/api/v1/attempts/${attemptId}`,
         );
         failures = 0;
@@ -228,6 +235,7 @@ export function PracticePage() {
         const lines = [label];
         if (d.feedback?.basis) lines.push(`依据:${d.feedback.basis}`);
         if (d.feedback?.comment) lines.push(`建议:${d.feedback.comment}`);
+        if (d.graduated) lines.push(graduationNotice());
         setFeedback(lines.join("\n"));
         setRevealed(true);
         return;
@@ -297,12 +305,15 @@ export function PracticePage() {
         />
         <Card className="app-panel" withBorder>
           <Stack gap="md">
-            <Select
-              label="学科"
-              data={Subjects.map((s) => ({ value: s, label: SUBJECT_LABELS[s] }))}
-              value={subject}
-              onChange={setSubject}
-            />
+            <Box>
+              <Text size="sm" fw={500} mb={4}>学科</Text>
+              <SegmentedControl
+                fullWidth
+                value={subject ?? ""}
+                onChange={(v) => setSubject(v)}
+                data={Subjects.map((s) => ({ value: s, label: SUBJECT_LABELS[s] }))}
+              />
+            </Box>
             <Box>
               <Text size="sm" fw={500} mb={4}>题目来源</Text>
               <SegmentedControl
@@ -431,7 +442,7 @@ export function PracticePage() {
               <Button onClick={() => void submitAnswer()} disabled={item.type === "choice" && !choice}>
                 提交作答
               </Button>
-              <Button variant="subtle" onClick={() => void submitAnswer({ gaveUp: true })}>
+              <Button variant="light" color="gray" onClick={() => void submitAnswer({ gaveUp: true })}>
                 不知道
               </Button>
             </Group>
@@ -486,15 +497,17 @@ export function PracticePage() {
                   <>
                     <Text size="xs" c="dimmed">认为判定不对?</Text>
                     <Button
-                      variant="subtle"
+                      variant="light"
+                      color="teal"
                       size="xs"
                       disabled={currentResult === "correct"}
                       onClick={() => void appeal("correct")}
                     >
-                      我对了
+                      我答对了
                     </Button>
                     <Button
-                      variant="subtle"
+                      variant="light"
+                      color="yellow"
                       size="xs"
                       disabled={currentResult === "partial"}
                       onClick={() => void appeal("partial")}
@@ -502,7 +515,8 @@ export function PracticePage() {
                       部分对
                     </Button>
                     <Button
-                      variant="subtle"
+                      variant="light"
+                      color="red"
                       size="xs"
                       disabled={currentResult === "wrong"}
                       onClick={() => void appeal("wrong")}
@@ -513,10 +527,10 @@ export function PracticePage() {
                 )}
                 {set.questions[idx].kind === "generated" && (
                   <>
-                    <Button variant="subtle" color="orange" onClick={() => void report("wrong_answer")}>
+                    <Button variant="light" color="orange" size="xs" onClick={() => void report("wrong_answer")}>
                       报告答案错误
                     </Button>
-                    <Button variant="subtle" color="gray" onClick={() => void report("unclear")}>
+                    <Button variant="light" color="gray" size="xs" onClick={() => void report("unclear")}>
                       题意不清
                     </Button>
                   </>

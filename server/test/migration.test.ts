@@ -99,11 +99,26 @@ describe("迁移", () => {
     sqlite.pragma("foreign_keys = ON");
 
     const applied = runMigrations(sqlite, MIGRATIONS_DIR);
-    expect(applied).toEqual(["0007_review_intervals.sql"]);
+    expect(applied).toEqual(["0007_review_intervals.sql", "0008_revival_toggle.sql"]);
     const cols = (
       sqlite.prepare("PRAGMA table_info(users)").all() as { name: string }[]
     ).map((c) => c.name);
     expect(cols).toContain("review_intervals_json");
+    expect(cols).toContain("revival_enabled");
+  });
+
+  test("v0.5:revival_enabled 默认 0(复活开关默认关闭)", () => {
+    const sqlite = freshDb();
+    runMigrations(sqlite, MIGRATIONS_DIR);
+    sqlite
+      .prepare(
+        `INSERT INTO users (id, display_name, created_at) VALUES ('u_x', '', '2026-01-01T00:00:00Z')`,
+      )
+      .run();
+    const u = sqlite.prepare("SELECT revival_enabled FROM users WHERE id='u_x'").get() as {
+      revival_enabled: number;
+    };
+    expect(u.revival_enabled).toBe(0);
   });
 
   test("v0.3 约束:attempts 接受 pending_judge,memory_facts 接受 habit_pattern,origin 只认 import/manual/ai", () => {

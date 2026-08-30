@@ -308,6 +308,7 @@ export async function meHandler(req: FastifyRequest) {
     displayName: u.displayName,
     currentGrade: u.currentGrade,
     reviewIntervals: reviewIntervalsOrNull(u.reviewIntervalsJson),
+    revivalEnabled: u.revivalEnabled === 1,
   };
 }
 
@@ -327,6 +328,12 @@ export async function patchMeHandler(req: FastifyRequest, reply: FastifyReply) {
         parsed.data.reviewIntervals === undefined
           ? u.reviewIntervalsJson
           : JSON.stringify(parsed.data.reviewIntervals),
+      revivalEnabled:
+        parsed.data.revivalEnabled === undefined
+          ? u.revivalEnabled
+          : parsed.data.revivalEnabled
+            ? 1
+            : 0,
     })
     .where(eq(users.id, u.id))
     .run();

@@ -21,6 +21,7 @@ import { api } from "../lib/api";
 import { MathText } from "../components/MathText";
 import { PageHeader } from "../components/PageHeader";
 import { EmptyState } from "../components/ui";
+import { GRADUATION_STREAK } from "@mistake-book/shared";
 
 interface TodayItem {
   mistakeId: string;
@@ -41,6 +42,13 @@ interface AttemptResponse {
   result?: string;
   masteryDelta?: number | null;
   nextReviewDate?: string | null;
+  graduated?: boolean;
+}
+
+/** 毕业提示(PRD 6.3):连续答对达阈值后不再安排复习。
+ *  不承诺"旧题自动回来"——概念重逢复活是设置页开关(默认关闭)。 */
+function graduationNotice(): string {
+  return `🎉 连续 ${GRADUATION_STREAK} 次答对,这道题已毕业,不再安排复习`;
 }
 
 /**
@@ -114,6 +122,7 @@ export function ReviewPage() {
           parts.push(res.masteryDelta === 0 ? "掌握度无变化" : `掌握度 ${res.masteryDelta > 0 ? "+" : ""}${res.masteryDelta}`);
         }
         if (res.nextReviewDate) parts.push(`下次复习 ${res.nextReviewDate}`);
+        if (res.graduated) parts.push(graduationNotice());
         setMessage(parts.join(" · "));
         advance();
       }
@@ -138,7 +147,7 @@ export function ReviewPage() {
       await new Promise((r) => setTimeout(r, 1500));
       setWaitSec(Math.round((Date.now() - started) / 1000));
       try {
-        const d = await api<{ result: string; feedback: { basis: string; comment: string } | null }>(
+        const d = await api<{ result: string; feedback: { basis: string; comment: string } | null; graduated?: boolean }>(
           `/api/v1/attempts/${id}`,
         );
         failures = 0;
@@ -149,6 +158,7 @@ export function ReviewPage() {
         const lines = [label];
         if (d.feedback?.basis) lines.push(`依据:${d.feedback.basis}`);
         if (d.feedback?.comment) lines.push(`建议:${d.feedback.comment}`);
+        if (d.graduated) lines.push(graduationNotice());
         setFeedback(lines.join("\n"));
         setRevealed(true);
         return;
@@ -258,7 +268,7 @@ export function ReviewPage() {
               <Button onClick={() => void submit()} disabled={!draft.trim()}>
                 提交作答
               </Button>
-              <Button variant="light" onClick={() => void submit({ gaveUp: true })}>
+              <Button variant="light" color="gray" onClick={() => void submit({ gaveUp: true })}>
                 不知道(跳过)
               </Button>
             </Group>
@@ -319,7 +329,8 @@ export function ReviewPage() {
                   <>
                     <Text size="xs" c="dimmed">认为判定不对?</Text>
                     <Button
-                      variant="subtle"
+                      variant="light"
+                      color="teal"
                       size="xs"
                       disabled={currentResult === "correct"}
                       onClick={() => void appeal("correct")}
@@ -327,7 +338,8 @@ export function ReviewPage() {
                       我答对了
                     </Button>
                     <Button
-                      variant="subtle"
+                      variant="light"
+                      color="yellow"
                       size="xs"
                       disabled={currentResult === "partial"}
                       onClick={() => void appeal("partial")}
@@ -335,12 +347,13 @@ export function ReviewPage() {
                       部分对
                     </Button>
                     <Button
-                      variant="subtle"
+                      variant="light"
+                      color="red"
                       size="xs"
                       disabled={currentResult === "wrong"}
                       onClick={() => void appeal("wrong")}
                     >
-                      我答错了
+                      我错了
                     </Button>
                   </>
                 )}

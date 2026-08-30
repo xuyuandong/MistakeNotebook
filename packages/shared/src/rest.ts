@@ -163,6 +163,8 @@ export const AttemptResponse = z.object({
   result: AttemptResult.optional(),
   masteryDelta: z.number().int().nullable().optional(),
   nextReviewDate: z.string().nullable().optional(),
+  /** 本次作答使错题毕业(连续答对达阈值),不再安排复习 */
+  graduated: z.boolean().optional(),
 });
 export type AttemptResponse = z.infer<typeof AttemptResponse>;
 
@@ -176,6 +178,8 @@ export const AttemptDetailResponse = z.object({
     })
     .nullable()
     .optional(),
+  /** 该作答对应的错题已毕业(无未完成排期且连续答对达阈值) */
+  graduated: z.boolean().optional(),
 });
 export type AttemptDetailResponse = z.infer<typeof AttemptDetailResponse>;
 
@@ -356,11 +360,14 @@ export const MeResponse = z.object({
   displayName: z.string(),
   currentGrade: z.string().nullable(),
   reviewIntervals: ReviewIntervalsConfig.nullable(),
+  /** 概念重逢复活开关(默认关闭):开启后新错题关联概念时,该概念下已毕业旧题重新排期 */
+  revivalEnabled: z.boolean(),
 });
 export const MePatch = z.object({
   currentGrade: z.string().max(20).nullable().optional(),
   displayName: z.string().max(50).optional(),
   reviewIntervals: ReviewIntervalsConfig.optional(),
+  revivalEnabled: z.boolean().optional(),
 });
 
 // ---- 复习 ----

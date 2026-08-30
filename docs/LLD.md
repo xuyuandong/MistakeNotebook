@@ -122,6 +122,7 @@ CREATE TABLE users (
   display_name  TEXT NOT NULL DEFAULT '',
   current_grade TEXT,                          -- 当前年级,仅影响难度/报告/权重
   review_intervals_json TEXT,                  -- v0.4:分学科复习间隔 JSON(空 = 默认),见 §6.2
+  revival_enabled INTEGER NOT NULL DEFAULT 0,  -- v0.5:概念重逢复活开关(默认关),见 §6.2
   created_at    TEXT NOT NULL
 );
 
@@ -225,6 +226,7 @@ CREATE TABLE mistake_concepts (
 );
 
 -- 复习计划(追加历史,当前到期 = status='scheduled' 且 due_date<=今天)
+-- 毕业不是状态值:毕业题 = 无 scheduled 排期且尾部连续答对≥3(attempts 派生,可重算)
 CREATE TABLE review_schedules (
   id             TEXT PRIMARY KEY,
   user_id        TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -434,14 +436,14 @@ CREATE VIRTUAL TABLE mistakes_fts USING fts5(
 | POST | `/learner-profile/refresh` | — → `{ job }`;已有同类型未完成任务时返回它并带 `AI_JOB_RUNNING` 语义字段 `existing: true`,不重复创建 |
 | GET | `/learner-profile` | — → `{ summaries, pendingCount, lastJob, facts }`(纯查询,绝不创建任务/调模型) |
 | GET | `/reviews/today` | — → `{ items: [{ mistakeId, dueDate, overdue }] }`(一次取一道由前端控制);依赖图形的错题不在到期列表,也不计入复习统计 |
-| POST | `/attempts` | `{ sourceType, sourceId, answer?, usedHint? }` → `{ attemptId, judging:'local'\|'llm', result? }`;客观题本地比对同步返回 result;主观题落 `pending_judge` + 创建 `judge_answer` 任务(幂等键 `judge:{attemptId}`) |
-| GET | `/attempts/{id}` | — → `{ result, feedback? }`;轮询 LLM 判分结果 |
+| POST | `/attempts` | `{ sourceType, sourceId, answer?, usedHint? }` → `{ attemptId, judging:'local'\|'llm', result?, graduated? }`;客观题本地比对同步返回 result;主观题落 `pending_judge` + 创建 `judge_answer` 任务(幂等键 `judge:{attemptId}`);`graduated=true` 表示该错题连续答对达阈值、不再安排复习 |
+| GET | `/attempts/{id}` | — → `{ result, feedback?, graduated? }`;轮询 LLM 判分结果 |
 | GET/PATCH | `/settings` | 当前年级/昵称(免登录,无账号概念);年级仅影响难度、报告语境和历史权重 |
 | POST | `/practice-sets` | `{ subject, mode:'past'\|'new', origin:'smart'\|'mistake'\|'custom', difficulty?, questionType?, count }` → `{ practiceSetId }`;创建 `generate_questions` 任务(先选题分析,再按 mode 出旧题/编新题) |
 | GET | `/practice-sets/{id}` | — → `{ status, selection?, questions: GeneratedQuestion[] }`;`selection` 为选题分析(目标知识点与理由) |
 | POST | `/questions/{id}/reports` | `{ reason }` → 204;被举报题置 `reported`,不再进入推荐 |
 | GET | `/analytics/weaknesses` | — → Top10 薄弱点、30 天错误类型分布、本周复习完成情况、学习方法画像(纯查询) |
-| GET/PATCH | `/me` | 设置(免登录单用户):年级 `currentGrade` + 分科复习间隔 `reviewIntervals`(三科天数数组,1~6 档严格递增,空 = 默认);PATCH 校验后存 `users.review_intervals_json` |
+| GET/PATCH | `/me` | 设置(免登录单用户):年级 `currentGrade` + 分科复习间隔 `reviewIntervals`(三科天数数组,1~6 档严格递增,空 = 默认)+ 概念重逢复活开关 `revivalEnabled`(默认 false);PATCH 校验后存 `users` 对应列 |
 | GET/PATCH | `/concepts`, `/concepts/{id}` | 概念列表(带掌握分);改名(旧名记为别名)/合并(`merged_into_id` 可追溯)/忽略 |
 | GET | `/export/json`, `/export/markdown` | 全量事实源导出(PRD 5.5) |
 | POST | `/data/purge` | `{ unlock }` → 204;一键清空(含 import_batches 原文存档),`users` 种子记录保留;子表靠外键级联。**需解锁**:unlock 必须等于 `.env` 的 `APP_AUTH_TOKEN`(timingSafeEqual 比对,403 拒绝);该变量未配置时功能锁定 |
@@ -519,6 +521,10 @@ MistakeCreate = {
      d. 短事务:按 (mistake_id, mistake_version) 幂等写入 mistake_concepts、
         技术性错误类型、memory_facts(含 kind='habit_pattern' 的学习方法结论;
         带证据与置信度,画像推断打标;冲突→新版本/降置信,不静默覆盖)
+     d'. 概念重逢复活(PRD 6.3):本次真正新建的 (mistake, version, concept) 关联
+        → 同一短事务内 reviveGraduatedForConcept:该概念下已毕业旧错题
+        (无 scheduled 排期 + 尾部连续答对 ≥3、未归档)按第 2 档重新排期;
+        已有排期/重复分析不触发(幂等);仅当 users.revival_enabled 开启(默认关闭)
      e. 同一短事务内:本批涉及概念用确定性代码重算 mastery、统计
   3. 全部批次完成后:用上一版学科总结 + 本批新增分析 + 最新统计
      生成新学科总结(model 调用),校验通过 → 事务内 upsert learner_summaries,
@@ -575,6 +581,7 @@ analyze@4 输出约定(单题):主要/次要技术性错误类型、候选概念
   4. 短事务:写 attempts.result / judged_by='llm' / feedback_json{basis, comment}
      + learning_event(practice_attempted / review_attempted)
      + 确定性重算受影响概念 mastery(partial 计分见 §6.1)+ review_schedules
+     (复习错题答对后尾部连续正确 ≥3 → 毕业:排期置 done 且不再调度,PRD 6.3)
 申诉/改判:PATCH /attempts/{id} { result } → judged_by='user_appeal',
   feedback_json.appeal 记录;事件幂等(UNIQUE 约束),掌握度按改判结果重算
 ```
@@ -626,6 +633,16 @@ freshness = min(1, 距上次练习天数 ≤ 14 ? 1 : 1 - (天数-14)/90, 下限
 答对:interval_index+1(封顶顶档);部分正确/答错/放弃:index 原地不变(不倒退,PRD 6.3)
   旧排期 index 超出新配置长度时钳制到顶档;下次到期 = 实际完成日 + 当前档间隔
   (到期日 ≤ 今天即出现在复习列表,逾期不丢题)
+毕业:答对后尾部连续正确 ≥ GRADUATION_STREAK(=3,部分/答错/放弃打断)
+  → 该错题所有 scheduled 排期置 done,不再调度;毕业不是新状态值,
+  派生判定 = 无 scheduled 排期且尾部连续正确达阈值(isGraduated,可从 attempts 重算)
+复活(默认关闭,users.revival_enabled 开关,设置页可改):概念重逢
+  (分析新建 (mistake,version,concept) 关联)→ 同概念已毕业旧题
+  按 REVIVAL_INTERVAL_INDEX(=1,第 2 档)重排期;复活后一次答对即再次毕业
+  (旧连续次数仍在尾部),答错回常规节奏;与关联写入同一事务,幂等。
+  开关关闭时 reviveGraduatedForConcept 直接返回 0,毕业机制不受影响
+归档:patch archived 0→1 → 该错题 scheduled 排期置 canceled(审计保留);
+  恢复归档不自动恢复排期
 "稍后复习"= due_date+1 且 index 不变;"手动标记已掌握"= status 置 done 不再调度
 ```
 

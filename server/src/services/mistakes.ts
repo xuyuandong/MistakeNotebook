@@ -6,6 +6,7 @@ import {
   learningEvents,
   mistakeVersions,
   mistakes,
+  reviewSchedules,
   users,
 } from "../db/schema.js";
 import type { Db } from "../db/client.js";
@@ -162,6 +163,7 @@ export function patchMistake(
     }
 
     const searchText = buildSearchText(content, patch.source ?? row.source ?? undefined);
+    const willArchive = patch.archived === true && row.archived === 0;
     tx.update(mistakes)
       .set({
         subject: patch.subject ?? row.subject,
@@ -175,6 +177,21 @@ export function patchMistake(
       })
       .where(eq(mistakes.id, id))
       .run();
+
+    if (willArchive) {
+      // 归档即退出复习:取消未完成排期(保留 canceled 历史供审计);
+      // 恢复归档不自动恢复排期,概念重逢复活或重新出现错误时才会再进队列(PRD 6.3)
+      tx.update(reviewSchedules)
+        .set({ status: "canceled", completedAt: new Date().toISOString() })
+        .where(
+          and(
+            eq(reviewSchedules.userId, userId),
+            eq(reviewSchedules.mistakeId, id),
+            eq(reviewSchedules.status, "scheduled"),
+          ),
+        )
+        .run();
+    }
 
     if (patch.content) {
       const versionId = randomUUID();

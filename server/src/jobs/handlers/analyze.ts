@@ -24,6 +24,8 @@ import type { HandlerContext } from "./judge.js";
 import { promptFor, ERROR_TYPE_NAMES } from "../../prompts/registry.js";
 import { resolveOrCreateConcept } from "../../services/concepts.js";
 import { recomputeMasteryForConcept } from "../../services/mastery.js";
+import { reviveGraduatedForConcept } from "../../services/review.js";
+import type { Db } from "../../db/client.js";
 
 const BATCH_SIZE = 10;
 
@@ -230,6 +232,8 @@ function writeAnalysis(
   hasStudentInput: boolean,
 ): void {
   const affectedConceptIds: string[] = [];
+  /** 本次分析真正新建的概念关联(去重后触发概念重逢复活,PRD 6.3) */
+  const newlyLinkedConceptIds: string[] = [];
 
   // 空白题 = 学生完全不会(用户 2026-08-29 决策):正常归因,不追问补充
   const effective = hasStudentInput
@@ -260,7 +264,8 @@ function writeAnalysis(
         c.confidence,
       );
       affectedConceptIds.push(conceptId);
-      tx.insert(mistakeConcepts)
+      const inserted = tx
+        .insert(mistakeConcepts)
         .values({
           id: randomUUID(),
           mistakeId: mistake.id,
@@ -274,6 +279,11 @@ function writeAnalysis(
         })
         .onConflictDoNothing()
         .run();
+      if (inserted.changes > 0) newlyLinkedConceptIds.push(conceptId);
+    }
+    // 概念重逢复活:与关联写入同一事务;已有关联/重复分析不触发(幂等)
+    for (const conceptId of new Set(newlyLinkedConceptIds)) {
+      reviveGraduatedForConcept(tx as unknown as Db, userId, conceptId);
     }
 
     // 主动归因(2026-08-29 决策):已给出归因 → analyzed;追问仅作展示,不阻塞;

@@ -9,6 +9,7 @@ import {
   PasswordInput,
   Select,
   Stack,
+  Switch,
   Text,
   TextInput,
   ThemeIcon,
@@ -30,9 +31,11 @@ interface Me {
   displayName: string;
   currentGrade: string | null;
   reviewIntervals: Record<string, number[]> | null;
+  revivalEnabled: boolean;
 }
 
 const GRADES = [
+  "六年级",
   "初一", "初二", "初三",
   "高一", "高二", "高三",
 ].map((g) => ({ value: g, label: g }));
@@ -48,6 +51,7 @@ export function SettingsPage() {
   const [me, setMe] = useState<Me | null>(null);
   const [grade, setGrade] = useState<string | null>(null);
   const [intervals, setIntervals] = useState<Record<string, string>>({});
+  const [revival, setRevival] = useState(false);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [purgeOpen, setPurgeOpen] = useState(false);
@@ -60,6 +64,7 @@ export function SettingsPage() {
       const m = await api<Me>("/api/v1/me");
       setMe(m);
       setGrade(m.currentGrade);
+      setRevival(m.revivalEnabled);
       setIntervals(
         Object.fromEntries(
           Subjects.map((s) => [
@@ -105,7 +110,7 @@ export function SettingsPage() {
     try {
       await api("/api/v1/me", {
         method: "PATCH",
-        json: { currentGrade: grade, reviewIntervals: parsed },
+        json: { currentGrade: grade, reviewIntervals: parsed, revivalEnabled: revival },
       });
       setSaved(true);
       setTimeout(() => setSaved(false), 2000);
@@ -183,6 +188,13 @@ export function SettingsPage() {
             />
           ))}
         </Stack>
+        <Switch
+          mt="md"
+          label="概念重逢复活(默认关闭)"
+          description="开启后,新错题被 AI 分析归入某知识概念时,该概念下已毕业的旧错题会按第 2 档间隔(数学约 10 天、语文/英语约 3 天)重新进入复习队列;复活后答对一次即再次毕业。关闭时不影响毕业机制本身。"
+          checked={revival}
+          onChange={(e) => setRevival(e.currentTarget.checked)}
+        />
         <Group mt="md">
           <Button onClick={() => void saveSettings()}>保存设置</Button>
           {saved && (

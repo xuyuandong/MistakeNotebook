@@ -16,6 +16,8 @@ export const users = sqliteTable("users", {
   displayName: text("display_name").notNull().default(""),
   currentGrade: text("current_grade"),
   reviewIntervalsJson: text("review_intervals_json"),
+  // 概念重逢复活开关(0008):默认 0 关闭,毕业机制不受影响
+  revivalEnabled: integer("revival_enabled").notNull().default(0),
   createdAt: text("created_at").notNull(),
 });
 
