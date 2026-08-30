@@ -81,7 +81,63 @@ pnpm dev                  # 并行启动 server(:8787) 与 web(:5173)
 | `pnpm typecheck` | 全仓 TypeScript 检查 |
 | `pnpm build` | 构建 web 静态资源（含 PWA service worker） |
 
-> 密钥只放 `.env`，不入库不入日志；模型配置修改后需重启服务生效。
+## 🔑 配置：`.env` 与模型
+
+### `.env`（密钥与运行参数）
+
+从 `.env.example` 复制后填写。服务端从自身目录向上查找：`server/.env` 或仓库根目录 `.env` 均可（先找到的生效）；进程里已存在的同名环境变量优先，`.env` 不会覆盖它们。`.env` 已被 gitignore，**密钥只放这里，不入库、不入日志**。
+
+| 变量 | 说明 |
+|---|---|
+| `PORT` | 服务端口，默认 `8787` |
+| `DATA_DIR` | SQLite 与附件的持久化根目录，默认 `./data` |
+| `APP_AUTH_TOKEN` | 设置页「永久删除全部数据」的解锁口令；留空 = 清空功能锁定 |
+| 模型密钥 | 变量名由 `config/models.yaml` 的 `api_key_env` 指定，`.env.example` 预置了 `DEEPSEEK_API_KEY` / `KIMI_API_KEY` |
+
+### `config/models.yaml`（模型槽位）
+
+系统只有一个 `text_model` 槽位，错误归因、总结、出题、判分共用；题目识别在豆包侧完成，本系统不接视觉模型。字段：
+
+| 字段 | 说明 |
+|---|---|
+| `provider` | 只允许 `deepseek` / `glm` / `kimi` / `mock`（mock 仅用于开发测试） |
+| `protocol` | `openai`（Chat Completions）或 `anthropic`（Messages 协议，如 Kimi 端点） |
+| `base_url` | API 地址，支持 `${VAR}` 形式引用环境变量 |
+| `api_key_env` | 存放密钥的环境变量**名称**（密钥本身不写入 yaml） |
+| `model` | 模型名，以各家控制台为准 |
+
+默认配置即 DeepSeek：
+
+```yaml
+text_model:
+  provider: deepseek
+  protocol: openai
+  base_url: https://api.deepseek.com
+  api_key_env: DEEPSEEK_API_KEY
+  model: deepseek-v4-flash
+```
+
+切换到 Kimi 或 GLM 时改写槽位并在 `.env` 补对应密钥，例如：
+
+```yaml
+# Kimi（Anthropic 兼容端点）
+text_model:
+  provider: kimi
+  protocol: anthropic
+  base_url: https://api.moonshot.cn/anthropic
+  api_key_env: KIMI_API_KEY
+  model: kimi-k2-…   # 以月之暗面控制台为准
+
+# GLM（OpenAI 兼容端点）
+text_model:
+  provider: glm
+  protocol: openai
+  base_url: https://open.bigmodel.cn/api/paas/v4
+  api_key_env: ZHIPU_API_KEY   # 在 .env 中补 ZHIPU_API_KEY=…
+  model: glm-4…                # 以智谱控制台为准
+```
+
+规则：修改 `models.yaml` 或 `.env` 后**重启服务生效**，不做热切换、自动路由或故障转移；`api_key_env` 指向的变量未设置时，开发环境降级为 mock provider 并打印警告（按任务类型返回最小可用的占位 JSON，仅供开发联调），生产环境（`NODE_ENV=production`）直接拒绝启动。
 
 ## 📂 仓库结构
 
