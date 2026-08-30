@@ -283,7 +283,7 @@ export function SettingsPage() {
           永久删除全部数据
         </Button>
         <Text size="xs" c="dimmed" mt="xs">
-          需输入 .env 中 APP_AUTH_TOKEN 配置的解锁口令;未配置时清空功能锁定。
+          需输入 APP_AUTH_TOKEN 配置的解锁口令;未配置时清空功能锁定。
         </Text>
       </Card>
 
