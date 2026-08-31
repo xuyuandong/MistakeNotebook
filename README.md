@@ -8,7 +8,7 @@
 A self-hosted AI-powered mistake notebook for middle & high school students (Chinese / Math / English).
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
-[![Node](https://img.shields.io/badge/node-%E2%89%A520-brightgreen.svg)](https://nodejs.org/)
+[![Node](https://img.shields.io/badge/node-20%20~%2026-brightgreen.svg)](https://nodejs.org/)
 ![Tests](https://img.shields.io/badge/tests-112%20passing-brightgreen.svg)
 [![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178C6.svg?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
 [![React](https://img.shields.io/badge/React-18-61DAFB.svg?logo=react&logoColor=white)](https://react.dev/)
@@ -64,15 +64,29 @@ flowchart LR
 
 ## 🚀 快速开始
 
+### 环境要求
+
+- **Node.js 20 ~ 26**（推荐 20 或 22 LTS；Node 26 需要本仓库已升级的 `better-sqlite3@^13`）
+- **pnpm 9 / 10 / 11**（推荐 9+；pnpm 10+ 对 postinstall 脚本有额外白名单机制）
+- macOS / Linux 需能编译原生模块（macOS 装 Xcode Command Line Tools，`xcode-select --install`）
+
+### 安装并启动
+
 ```bash
 git clone https://github.com/xuyuandong/MistakeNotebook.git
 cd MistakeNotebook
+
+# 安装依赖。pnpm 10/11 默认会拦截原生模块的 postinstall 构建脚本，
+# 若提示 "Ignored build scripts: better-sqlite3, esbuild"，请运行：
+#   pnpm approve-builds better-sqlite3 esbuild
+# 或先配置构建白名单后再安装（仓库已内置，通常无需手动操作）。
 pnpm install
+
 cp .env.example .env      # 填入 DEEPSEEK_API_KEY（或 KIMI_API_KEY）；留空则降级 mock provider，仅限开发
 pnpm dev                  # 并行启动 server(:8787) 与 web(:5173)
 ```
 
-打开 http://localhost:5173 即用（免登录，单机家庭使用；**不要暴露到公网**）。需要 Node.js ≥ 20 与 pnpm。
+打开 http://localhost:5173 即用（免登录，单机家庭使用；**不要暴露到公网**）。
 
 | 命令 | 说明 |
 |---|---|
@@ -167,6 +181,16 @@ AI 归因必须结合历史错题规律与学生画像，输出带证据与置�
 
 **可以多人使用或部署公网吗？**
 MVP 免登录，仅限单机 / 可信内网家庭使用。公网部署前必须先恢复鉴权与用户隔离。
+
+**安装时报 `Ignored build scripts: better-sqlite3, esbuild` 怎么办？**
+pnpm 10/11 默认不再自动运行依赖的 postinstall 构建脚本。仓库已在 `pnpm-workspace.yaml` 的 `allowBuilds` 中声明白名单，若你本地仍被拦截，手动批准即可：
+
+```bash
+pnpm approve-builds better-sqlite3 esbuild
+pnpm install
+```
+
+若启动时报 `Could not locate the bindings file`，说明 `better-sqlite3` 的原生插件未编译成功，通常是 Node 版本不兼容。请检查 Node 是否在 `20 ~ 26` 范围内（推荐 20/22 LTS），并确保系统能编译 C++（macOS 需 Xcode Command Line Tools）。
 
 ## 🗺️ Roadmap
 

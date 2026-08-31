@@ -11,12 +11,6 @@
     "typecheck": "pnpm -r typecheck"
   },
   "engines": {
-    "node": ">=20"
-  },
-  "pnpm": {
-    "onlyBuiltDependencies": [
-      "better-sqlite3",
-      "esbuild"
-    ]
+    "node": ">=20 <27"
   }
 }
